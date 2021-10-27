@@ -60,9 +60,9 @@ print(sprintf('HURP_PDE_noisy_simulated_data.eps'),'-depsc');
 %Now setup MCMC to infer parameters of interest
 %let theta=[l_h,D_h,lambda,mu]; assume we have good estimates of other
 %parameters. Fix these at true values.
-run_mcmc = false;
-niter = 10^3;
-identifier = "v125";
+run_mcmc = true;
+niter = 10^4;
+identifier = "v126";
 burnin=niter/2;
 nparams=5;
 
@@ -89,7 +89,7 @@ if run_mcmc
         params.mu = theta_star(4);
         params.v = theta_star(5);
 %        params.sigma = theta_star(6);
-        tic; [u_lead,u_trail] = solve_PDE_lead_trail(params); toc;
+        [u_lead,u_trail] = solve_PDE_lead_trail(params);
         
         %evaluate likelihood
         mask_t = 1+(0:9)*5; %subset of time points to evaluate likelihood at

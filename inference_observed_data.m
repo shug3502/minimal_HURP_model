@@ -13,7 +13,7 @@ params.nx=61; %number of points in spatial discretization
 params.sigma = 0.02;
 
 font_size = 24;
-df = readtable("~/Documents/Postdoc/HURP/in_vivo_hurp_switch_data_3_cells.csv"); %in vivo hurp profile data
+df = readtable("in_vivo_hurp_switch_data_3_cells.csv"); %in vivo hurp profile data
 %naive background subtraction
 background = min(df.hurp(:));
 u_lead_data = NaN(10,31); u_trail_data = NaN(10,31);
@@ -30,7 +30,7 @@ end
 %parameters. Fix these at true values.
 run_mcmc = false;
 niter = 10^3;
-identifier = "v123";
+identifier = "v126";
 burnin=niter/2;
 nparams=5;
 
@@ -60,8 +60,8 @@ if run_mcmc
         mask_x = 1:2:(params.nx); %subset of positions to evaluate likelihood at
         loglik_star = loglikelihood(u_lead(mask_t,mask_x),u_lead_data,params) + ...
             loglikelihood(u_trail(mask_t,mask_x),u_trail_data,params);
-        acceptance_ratio = (loglik_star - loglik);
-        if log(rand(1)) < acceptance_ratio %TODO: incorporate the prior
+        acceptance_ratio = (loglik_star - loglik) + (prior(theta_star,nparams) - prior(theta,nparams));
+        if log(rand(1)) < acceptance_ratio
             %accept
             theta = theta_star;
             loglik=loglik_star;
@@ -93,7 +93,7 @@ for i=1:nparams
     set(gca,'fontsize',font_size);
 end
 set(gcf,'PaperUnits','centimeters','PaperPosition',[0 0 42 21])
-print(sprintf('posterior_histograms_observed_data.eps'),'-depsc')
+print(sprintf('posterior_histograms_observed_data_%s.eps',identifier),'-depsc')
 figure;
 for i=1:nparams
     subplot(2,ceil(nparams/2),i);
@@ -104,13 +104,14 @@ for i=1:nparams
     set(gca,'fontsize',font_size);
 end
 set(gcf,'PaperUnits','centimeters','PaperPosition',[0 0 42 21])
-print(sprintf('posterior_traceplot_observed_data.eps'),'-depsc')
+print(sprintf('posterior_traceplot_observed_data_%s.eps',identifier),'-depsc')
 
 %simulate data with posterior median parameters
-params.l_h = 0.5; % median(theta_store((burnin+1):niter,1));
+params.l_h = median(theta_store((burnin+1):niter,1));
 params.D_h = median(theta_store((burnin+1):niter,2));
 params.lambda = median(theta_store((burnin+1):niter,3));
 params.mu = median(theta_store((burnin+1):niter,4));
+params.v = median(theta_store((burnin+1):niter,5));
 [u_lead_post,u_trail_post] = solve_PDE_lead_trail(params);
 
 color_mat = [0,0,0
@@ -174,11 +175,68 @@ title('Leading kinetochore (model)');
 %lgd = legend(string(0:9),'Location','west','Orientation','vertical');
 
 set(gcf,'PaperUnits','centimeters','PaperPosition',[0 0 42 21])
-print(sprintf('HURP_PDE_posterior_simulation_but_with_MNZ500nm.eps'),'-depsc');
+print(sprintf('HURP_PDE_posterior_simulation_%s.eps',identifier),'-depsc');
 
 function theta_star = proposal(theta,S)
 %random walk proposal on log space
 theta_star = exp(log(theta) + mvnrnd(zeros(length(theta),1),S));
+end
+
+function p = prior(theta,nparams)
+%l_h ~ N(0,1) T[0,];
+if theta(1)>=0
+    p = log(2*normpdf(theta(1))); %standard normal
+else 
+    p = -Inf;
+end
+%D_h ~ N(0,0.1) T[0,];
+if theta(2)>=0
+    p = p + log(2*normpdf(theta(2),0,0.1));
+else 
+    p = -Inf;
+end
+%lambda ~ N(0,1) T[0,];
+if theta(3)>=0
+    p = p + log(2*normpdf(theta(3),0,1));
+else 
+    p = -Inf;
+end
+%mu ~ N(0,1) T[0,];
+if theta(4)>=0
+    p = p + log(2*normpdf(theta(4),0,1));
+else 
+    p = -Inf;
+end
+%v ~ N(0,0.1) T[0,];
+if (nparams>=5)
+    if (theta(5)>=0)
+        p = p + log(2*normpdf(theta(5),0,0.1));
+    else 
+        p = -Inf;
+    end
+end
+%sigma ~ inverse_gamma(a,b)
+a = 3; b=0.5;
+if (nparams>=6)
+    if (theta(6)>=0)
+        p = p + log(inversegammapdf(theta(6),a,b));
+    else 
+        p = -Inf;
+    end
+end
+
+end
+function [ Y ] = inversegampdf( X,A,B )
+%inversegampdf Inverse gamma probability density function.
+%   Y = inversegampdf(X,A,B) returns the inverse gamma probability density
+%   function with shape and scale parameters A and B, respectively, at the
+%   values in X. The size of Y is the common size of the input arguments. A
+%   scalar input functions is a constant matrix of the same size as the
+%   other inputs.
+%from https://csdspnest.blogspot.com/2014/03/compute-inverse-gamma-pdf-and-cdf-in.html
+
+Y = B^A/gamma(A)*X.^(-A-1).*exp(-B./X);
+
 end
 
 function [u_lead,u_trail] = solve_PDE_lead_trail(params)
