@@ -65,11 +65,11 @@ run_mcmc = true;
 niter = 10^3;
 identifier = "v129_robin";
 burnin=niter/2;
-nparams=6;
+nparams=7;
 
 if run_mcmc
 %    theta0 = [0.5,0.001,0.1,0.1,0.05,0.02];
-    theta0 = [0.5,0.001,0.1,0.1,0.05,0.01];
+    theta0 = [0.5,0.001,0.1,0.1,0.05,0.01,1.0];
     theta_store = NaN(niter,nparams);
     theta = theta0;
     total_acceptances = 0; total_proposals = 0;
@@ -80,7 +80,7 @@ if run_mcmc
     
     while total_acceptances<niter
         %propose new parameters
-        theta_star = proposal(theta,S);
+        theta_star = proposal(theta,S)
         total_proposals = total_proposals + 1;
         
         %solve PDE
@@ -90,7 +90,8 @@ if run_mcmc
         params.mu = theta_star(4);
         params.v = theta_star(5);
         params.gamma = theta_star(6);
-%        params.sigma = theta_star(6);
+	params.scale = theta_star(7);
+%        params.sigma = theta_star(8);
         [u_lead,u_trail] = solve_PDE_lead_trail(params);
         
         %evaluate likelihood
@@ -106,22 +107,22 @@ if run_mcmc
             total_acceptances = total_acceptances + 1;
             theta_store(total_acceptances,:) = theta;
             if mod(total_acceptances,5)==0
-                fprintf(sprintf('iter %d: accept %f - l_h=%f, D_h=%f,lambda=%f, mu=%f, v=%f, gamma=%f, sigma=%f;\n',...
-                    total_acceptances,total_acceptances/total_proposals,theta(1),theta(2),theta(3),theta(4),params.v,params.gamma,params.sigma));
+                fprintf(sprintf('iter %d: accept %f - l_h=%f, D_h=%f,lambda=%f, mu=%f, v=%f, gamma=%f, scale=%f, sigma=%f;\n',...
+                    total_acceptances,total_acceptances/total_proposals,theta(1),theta(2),theta(3),theta(4),params.v,params.gamma,params.scale,params.sigma));
             end
         end
     end
     fprintf('final acceptance rate: %f \n',total_acceptances/total_proposals);
-    fprintf('posterior medians: %f %f %f %f %f %f %f\n', median(theta_store((burnin+1):niter,:),1));   
+    fprintf('posterior medians: %f %f %f %f %f %f %f %f\n', median(theta_store((burnin+1):niter,:),1));   
     save(sprintf('mcmc_output_synthetic_data_%s.mat',identifier))
 else
     load(sprintf('mcmc_output_synthetic_data_%s.mat',identifier))
 end
-param_names = {'l_h','D_h','lambda','mu','v','gamma','sigma'};
+param_names = {'l_h','D_h','lambda','mu','v','gamma','scale','sigma'};
 close all;
 figure;
 trueparams_vec = [trueparams.l_h,trueparams.D_h,trueparams.lambda,...
-    trueparams.mu,trueparams.v,trueparams.gamma,trueparams.sigma];
+    trueparams.mu,trueparams.v,trueparams.gamma,trueparams.scale,trueparams.sigma];
 for i=1:nparams
     subplot(2,ceil(nparams/2),i);
     histogram(theta_store(:,i),'DisplayStyle','stairs',...
@@ -188,16 +189,24 @@ end
 %gamma ~ N(0,0.1) T[0,];
 if (nparams>=6)
     if (theta(6)>=0)
-        p = p + log(2*normpdf(theta(5),0,0.1));
+        p = p + log(2*normpdf(theta(6),0,0.1));
+    else 
+	p = -Inf;
+    end
+end
+%scale ~ N(0,1) T[0,];
+if (nparams>=7)
+    if (theta(7)>=0)
+        p = p + log(2*normpdf(theta(7),0,1));
     else 
 	p = -Inf;
     end
 end
 %sigma ~ inverse_gamma(a,b)
 a = 3; b=0.5;
-if (nparams>=7)
-    if (theta(7)>=0)
-        p = p + log(inversegammapdf(theta(6),a,b));
+if (nparams>=8)
+    if (theta(8)>=0)
+        p = p + log(inversegammapdf(theta(8),a,b));
     else 
         p = -Inf;
     end

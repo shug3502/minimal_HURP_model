@@ -220,7 +220,7 @@ end
 %gamma ~ N(0,0.1) T[0,];
 if (nparams>=6)
     if (theta(6)>=0)
-        p = p + log(2*normpdf(theta(5),0,0.1));
+        p = p + log(2*normpdf(theta(6),0,0.1));
     else 
 	p = -Inf;
     end
@@ -229,7 +229,7 @@ end
 a = 3; b=0.5;
 if (nparams>=7)
     if (theta(7)>=0)
-        p = p + log(inversegammapdf(theta(6),a,b));
+        p = p + log(inversegammapdf(theta(7),a,b));
     else 
         p = -Inf;
     end
