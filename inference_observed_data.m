@@ -10,7 +10,7 @@ params.x_0=0; %initial position of chromosomes
 params.nx=61; %number of points in spatial discretization
 % trueparams.l_h = 0.5;
 %params.v = 0.03;
-params.sigma = 0.02;
+params.sigma = 0.005;
 
 font_size = 24;
 df = readtable("in_vivo_hurp_switch_data_3_cells.csv"); %in vivo hurp profile data
@@ -28,14 +28,14 @@ end
 %Now setup MCMC to infer parameters of interest
 %let theta=[l_h,D_h,lambda,mu]; assume we have good estimates of other
 %parameters. Fix these at true values.
-run_mcmc = false;
-niter = 10^3;
-identifier = "v126";
+run_mcmc = true;
+niter = 10^4;
+identifier = "v130_robin";
 burnin=niter/2;
-nparams=5;
+nparams=6;
 
 if run_mcmc
-    theta0 = [0.5,0.001,0.1,0.1,0.03];
+    theta0 = [0.5,0.001,0.1,0.1,0.03,0.01];
     theta_store = NaN(niter,nparams);
     theta = theta0;
     total_acceptances = 0; total_proposals = 0;
@@ -52,6 +52,7 @@ if run_mcmc
         params.lambda = theta_star(3);
         params.mu = theta_star(4);        
         params.v = theta_star(5);
+        params.gamma = theta_star(6);
 %        params.sigma = theta_star(6);
         [u_lead,u_trail] = solve_PDE_lead_trail(params);
         
@@ -68,8 +69,8 @@ if run_mcmc
             total_acceptances = total_acceptances + 1;
             theta_store(total_acceptances,:) = theta;
             if mod(total_acceptances,10)==0
-                fprintf(sprintf('iter %d: accept %f - l_h=%f, D_h=%f,lambda=%f, mu=%f, v=%f, sigma=%f;\n',...
-                    total_acceptances,total_acceptances/total_proposals,theta(1),theta(2),theta(3),theta(4),theta(5),params.sigma));
+                fprintf(sprintf('iter %d: accept %f - l_h=%f, D_h=%f,lambda=%f, mu=%f, v=%f, gamma=%f, sigma=%f;\n',...
+                    total_acceptances,total_acceptances/total_proposals,theta(1),theta(2),theta(3),theta(4),theta(5),theta(6),params.sigma));
             end
         end
     end
@@ -79,7 +80,7 @@ if run_mcmc
 else
     load(sprintf('mcmc_output_observed_data_%s.mat',identifier));
 end
-param_names = {'l_h','D_h','lambda','mu','v','sigma'};
+param_names = {'l_h','D_h','lambda','mu','v','gamma','sigma'};
 close all;
 figure;
 for i=1:nparams
@@ -112,6 +113,7 @@ params.D_h = median(theta_store((burnin+1):niter,2));
 params.lambda = median(theta_store((burnin+1):niter,3));
 params.mu = median(theta_store((burnin+1):niter,4));
 params.v = median(theta_store((burnin+1):niter,5));
+params.gammma = median(theta_store((burnin+1):niter,6));
 [u_lead_post,u_trail_post] = solve_PDE_lead_trail(params);
 
 color_mat = [0,0,0
@@ -215,10 +217,18 @@ if (nparams>=5)
         p = -Inf;
     end
 end
-%sigma ~ inverse_gamma(a,b)
-a = 3; b=0.5;
+%gamma ~ N(0,0.1) T[0,];
 if (nparams>=6)
     if (theta(6)>=0)
+        p = p + log(2*normpdf(theta(5),0,0.1));
+    else 
+	p = -Inf;
+    end
+end
+%sigma ~ inverse_gamma(a,b)
+a = 3; b=0.5;
+if (nparams>=7)
+    if (theta(7)>=0)
         p = p + log(inversegammapdf(theta(6),a,b));
     else 
         p = -Inf;
@@ -226,7 +236,7 @@ if (nparams>=6)
 end
 
 end
-function [ Y ] = inversegampdf( X,A,B )
+function [ Y ] = inversegammapdf( X,A,B )
 %inversegampdf Inverse gamma probability density function.
 %   Y = inversegampdf(X,A,B) returns the inverse gamma probability density
 %   function with shape and scale parameters A and B, respectively, at the
@@ -255,7 +265,9 @@ params.v=v; %speed of chromosome movements
 m = 0; %symmetry of coordinate system
 init_fun = @(x) pdex1ic(x,ones(1,params.nx),params);
 fun = @(x,t,u,dudx) pdex1pde(x,t,u,dudx,params); % anonymous function
-sol = pdepe(m,fun,init_fun,@pdex1bc,x,t);
+bc_fun = @(xl,ul,xr,ur,t) pdex1bc(xl,ul,xr,ur,t,params);
+%sol = pdepe(m,fun,init_fun,@pdex1bc,x,t);
+sol = pdepe(m,fun,init_fun,bc_fun,x,t);
 u = sol(:,:,1);
 
 %%%%%%%%%%%%%%%%%%%
@@ -268,7 +280,9 @@ params.mu_gdp = params.mu;
 
 fun = @(x,t,u,dudx) pdex1pde(x,t,u,dudx,params);
 init_fun_lead = @(x) pdex1ic(x,u(end,:),params);
-sol = pdepe(m,fun,init_fun_lead,@pdex1bc,x,t);
+bc_fun = @(xl,ul,xr,ur,t) pdex1bc(xl,ul,xr,ur,t,params);
+%sol = pdepe(m,fun,init_fun_lead,@pdex1bc,x,t);
+sol = pdepe(m,fun,init_fun_lead,bc_fun,x,t);
 
 u_lead = sol(:,:,1);
 
@@ -280,8 +294,10 @@ params.mu_gtp = params.mu;
 params.mu_gdp = params.mu;
 
 init_fun_trail = @(x) pdex1ic(x,u_lead(end,:),params);
+bc_fun = @(xl,ul,xr,ur,t) pdex1bc(xl,ul,xr,ur,t,params);
 fun = @(x,t,u,dudx) pdex1pde(x,t,u,dudx,params);
-sol = pdepe(m,fun,init_fun_trail,@pdex1bc,x,t);
+%sol = pdepe(m,fun,init_fun_trail,@pdex1bc,x,t);
+sol = pdepe(m,fun,init_fun_trail,bc_fun,x,t);
 u_trail = sol(:,:,1);
 end
 
@@ -424,9 +440,10 @@ end
 % %u0 = exp(-x/0.1);
 % end
 %----------------------------------------------
-function [pl,ql,pr,qr] = pdex1bc(xl,ul,xr,ur,t) % Boundary conditions
-pl = ul; %0
-ql = 0; %1;
+function [pl,ql,pr,qr] = pdex1bc(xl,ul,xr,ur,t,params) % Boundary conditions
+%try robin boundary condition
+pl = params.gamma*ul; %0; %ul;
+ql = -1; %1; %0
 pr = 0;%ur;
 qr =1; %0;
 end

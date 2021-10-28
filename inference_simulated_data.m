@@ -11,6 +11,7 @@ trueparams.nx=51; %number of points in spatial discretization
 trueparams.l_h = 0.5;
 trueparams.v = 0.03;
 trueparams.sigma = 0.01;
+trueparams.gamma = 0.02;
 
 tic; [u_lead_sim,u_trail_sim] = solve_PDE_lead_trail(trueparams); toc;
 %add observation noise
@@ -61,14 +62,14 @@ print(sprintf('HURP_PDE_noisy_simulated_data.eps'),'-depsc');
 %let theta=[l_h,D_h,lambda,mu]; assume we have good estimates of other
 %parameters. Fix these at true values.
 run_mcmc = true;
-niter = 10^4;
-identifier = "v126";
+niter = 10^3;
+identifier = "v129_robin";
 burnin=niter/2;
-nparams=5;
+nparams=6;
 
 if run_mcmc
 %    theta0 = [0.5,0.001,0.1,0.1,0.05,0.02];
-    theta0 = [0.5,0.001,0.1,0.1,0.05];
+    theta0 = [0.5,0.001,0.1,0.1,0.05,0.01];
     theta_store = NaN(niter,nparams);
     theta = theta0;
     total_acceptances = 0; total_proposals = 0;
@@ -88,6 +89,7 @@ if run_mcmc
         params.lambda = theta_star(3);
         params.mu = theta_star(4);
         params.v = theta_star(5);
+        params.gamma = theta_star(6);
 %        params.sigma = theta_star(6);
         [u_lead,u_trail] = solve_PDE_lead_trail(params);
         
@@ -97,29 +99,29 @@ if run_mcmc
         loglik_star = loglikelihood(u_lead(mask_t,mask_x),u_lead_sim(mask_t,mask_x),params) + ...
             loglikelihood(u_trail(mask_t,mask_x),u_trail_sim(mask_t,mask_x),params);
         acceptance_ratio = (loglik_star - loglik) + (prior(theta_star,nparams) - prior(theta,nparams));
-        if log(rand(1)) < acceptance_ratio %TODO: incorporate the prior
+        if log(rand(1)) < acceptance_ratio
             %accept
             theta = theta_star;
             loglik=loglik_star;
             total_acceptances = total_acceptances + 1;
             theta_store(total_acceptances,:) = theta;
             if mod(total_acceptances,5)==0
-                fprintf(sprintf('iter %d: accept %f - l_h=%f, D_h=%f,lambda=%f, mu=%f, v=%f, sigma=%f;\n',...
-                    total_acceptances,total_acceptances/total_proposals,theta(1),theta(2),theta(3),theta(4),params.v,params.sigma));
+                fprintf(sprintf('iter %d: accept %f - l_h=%f, D_h=%f,lambda=%f, mu=%f, v=%f, gamma=%f, sigma=%f;\n',...
+                    total_acceptances,total_acceptances/total_proposals,theta(1),theta(2),theta(3),theta(4),params.v,params.gamma,params.sigma));
             end
         end
     end
     fprintf('final acceptance rate: %f \n',total_acceptances/total_proposals);
-    fprintf('posterior medians: %f %f %f %f %f %f \n', median(theta_store((burnin+1):niter,:),1));   
+    fprintf('posterior medians: %f %f %f %f %f %f %f\n', median(theta_store((burnin+1):niter,:),1));   
     save(sprintf('mcmc_output_synthetic_data_%s.mat',identifier))
 else
     load(sprintf('mcmc_output_synthetic_data_%s.mat',identifier))
 end
-param_names = {'l_h','D_h','lambda','mu','v','sigma'};
+param_names = {'l_h','D_h','lambda','mu','v','gamma','sigma'};
 close all;
 figure;
 trueparams_vec = [trueparams.l_h,trueparams.D_h,trueparams.lambda,...
-    trueparams.mu,trueparams.v,trueparams.sigma];
+    trueparams.mu,trueparams.v,trueparams.gamma,trueparams.sigma];
 for i=1:nparams
     subplot(2,ceil(nparams/2),i);
     histogram(theta_store(:,i),'DisplayStyle','stairs',...
@@ -183,16 +185,23 @@ if (nparams>=5)
         p = -Inf;
     end
 end
-%sigma ~ inverse_gamma(a,b)
-a = 3; b=0.5;
+%gamma ~ N(0,0.1) T[0,];
 if (nparams>=6)
     if (theta(6)>=0)
+        p = p + log(2*normpdf(theta(5),0,0.1));
+    else 
+	p = -Inf;
+    end
+end
+%sigma ~ inverse_gamma(a,b)
+a = 3; b=0.5;
+if (nparams>=7)
+    if (theta(7)>=0)
         p = p + log(inversegammapdf(theta(6),a,b));
     else 
         p = -Inf;
     end
 end
-
 end
 function [ Y ] = inversegampdf( X,A,B )
 %inversegampdf Inverse gamma probability density function.
@@ -224,7 +233,9 @@ params.v=v; %speed of chromosome movements
 m = 0; %symmetry of coordinate system
 init_fun = @(x) pdex1ic(x,ones(1,params.nx),params);
 fun = @(x,t,u,dudx) pdex1pde(x,t,u,dudx,params); % anonymous function
-sol = pdepe(m,fun,init_fun,@pdex1bc,x,t);
+bc_fun = @(xl,ul,xr,ur,t) pdex1bc(xl,ul,xr,ur,t,params);
+%sol = pdepe(m,fun,init_fun,@pdex1bc,x,t);
+sol = pdepe(m,fun,init_fun,bc_fun,x,t);
 u = sol(:,:,1);
 
 %%%%%%%%%%%%%%%%%%%
@@ -237,8 +248,9 @@ params.mu_gdp = params.mu;
 
 fun = @(x,t,u,dudx) pdex1pde(x,t,u,dudx,params);
 init_fun_lead = @(x) pdex1ic(x,u(end,:),params);
-sol = pdepe(m,fun,init_fun_lead,@pdex1bc,x,t);
-
+bc_fun = @(xl,ul,xr,ur,t) pdex1bc(xl,ul,xr,ur,t,params);
+%sol = pdepe(m,fun,init_fun_lead,@pdex1bc,x,t);
+sol = pdepe(m,fun,init_fun_lead,bc_fun,x,t);
 u_lead = sol(:,:,1);
 
 %for trailing kinetochore sister
@@ -250,7 +262,9 @@ params.mu_gdp = params.mu;
 
 init_fun_trail = @(x) pdex1ic(x,u_lead(end,:),params);
 fun = @(x,t,u,dudx) pdex1pde(x,t,u,dudx,params);
-sol = pdepe(m,fun,init_fun_trail,@pdex1bc,x,t);
+bc_fun = @(xl,ul,xr,ur,t) pdex1bc(xl,ul,xr,ur,t,params);
+%sol = pdepe(m,fun,init_fun_trail,@pdex1bc,x,t);
+sol = pdepe(m,fun,init_fun_trail,bc_fun,x,t);
 u_trail = sol(:,:,1);
 end
 
@@ -393,9 +407,10 @@ end
 % %u0 = exp(-x/0.1);
 % end
 %----------------------------------------------
-function [pl,ql,pr,qr] = pdex1bc(xl,ul,xr,ur,t) % Boundary conditions
-pl = ul; %0
-ql = 0; %1;
+function [pl,ql,pr,qr] = pdex1bc(xl,ul,xr,ur,t,params) % Boundary conditions
+%try robin boundary condition
+pl = params.gamma*ul; %0; %ul;
+ql = -1; %1; %0
 pr = 0;%ur;
 qr =1; %0;
 end
