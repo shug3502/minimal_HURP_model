@@ -29,13 +29,13 @@ end
 %let theta=[l_h,D_h,lambda,mu]; assume we have good estimates of other
 %parameters. Fix these at true values.
 run_mcmc = true;
-niter = 10^4;
-identifier = "v130_robin";
+niter = 10^3;
+identifier = "v132_robin";
 burnin=niter/2;
-nparams=6;
+nparams=8;
 
 if run_mcmc
-    theta0 = [0.5,0.001,0.1,0.1,0.03,0.01];
+    theta0 = [0.5,0.001,0.1,0.1,0.03,0.1,-0.01,1.0];
     theta_store = NaN(niter,nparams);
     theta = theta0;
     total_acceptances = 0; total_proposals = 0;
@@ -52,7 +52,9 @@ if run_mcmc
         params.lambda = theta_star(3);
         params.mu = theta_star(4);        
         params.v = theta_star(5);
-        params.gamma = theta_star(6);
+        params.gamma1 = theta_star(6);
+	params.gamma2 = theta_star(7);
+        params.scale = theta_star(8);
 %        params.sigma = theta_star(6);
         [u_lead,u_trail] = solve_PDE_lead_trail(params);
         
@@ -69,18 +71,18 @@ if run_mcmc
             total_acceptances = total_acceptances + 1;
             theta_store(total_acceptances,:) = theta;
             if mod(total_acceptances,10)==0
-                fprintf(sprintf('iter %d: accept %f - l_h=%f, D_h=%f,lambda=%f, mu=%f, v=%f, gamma=%f, sigma=%f;\n',...
-                    total_acceptances,total_acceptances/total_proposals,theta(1),theta(2),theta(3),theta(4),theta(5),theta(6),params.sigma));
+                fprintf(sprintf('iter %d: accept %f - l_h=%f, D_h=%f,lambda=%f, mu=%f, v=%f, gamma1=%f, gamma2=%f, scale=%f, sigma=%f;\n',...
+                    total_acceptances,total_acceptances/total_proposals,theta(1),theta(2),theta(3),theta(4),theta(5),params.gamma1,params.gamma2,params.scale,params.sigma));
             end
         end
     end
     fprintf('final acceptance rate: %f \n',total_acceptances/total_proposals);
-    fprintf('posterior medians: %f %f %f %f %f \n', median(theta_store((burnin+1):niter,:),1));
+    fprintf('posterior medians: %f %f %f %f \n', median(theta_store((burnin+1):niter,:),1));
     save(sprintf('mcmc_output_observed_data_%s.mat',identifier));
 else
     load(sprintf('mcmc_output_observed_data_%s.mat',identifier));
 end
-param_names = {'l_h','D_h','lambda','mu','v','gamma','sigma'};
+param_names = {'l_h','D_h','lambda','mu','v','gamma1','gamma2','scale','sigma'};
 close all;
 figure;
 for i=1:nparams
@@ -113,7 +115,9 @@ params.D_h = median(theta_store((burnin+1):niter,2));
 params.lambda = median(theta_store((burnin+1):niter,3));
 params.mu = median(theta_store((burnin+1):niter,4));
 params.v = median(theta_store((burnin+1):niter,5));
-params.gammma = median(theta_store((burnin+1):niter,6));
+params.gamma1 = median(theta_store((burnin+1):niter,6));
+params.gamma2 = median(theta_store((burnin+1):niter,7));
+params.scale = median(theta_store((burnin+1):niter,8));
 [u_lead_post,u_trail_post] = solve_PDE_lead_trail(params);
 
 color_mat = [0,0,0
@@ -181,7 +185,7 @@ print(sprintf('HURP_PDE_posterior_simulation_%s.eps',identifier),'-depsc');
 
 function theta_star = proposal(theta,S)
 %random walk proposal on log space
-theta_star = exp(log(theta) + mvnrnd(zeros(length(theta),1),S));
+theta_star = sign(theta).*exp(log(abs(theta)) + mvnrnd(zeros(length(theta),1),S));
 end
 
 function p = prior(theta,nparams)
@@ -217,7 +221,7 @@ if (nparams>=5)
         p = -Inf;
     end
 end
-%gamma ~ N(0,0.1) T[0,];
+%gamma1 ~ N(0,0.1) T[0,];
 if (nparams>=6)
     if (theta(6)>=0)
         p = p + log(2*normpdf(theta(6),0,0.1));
@@ -225,11 +229,27 @@ if (nparams>=6)
 	p = -Inf;
     end
 end
+%gamma2 ~ N(0,0.1) T[,0];
+if (nparams>=7)
+    if (theta(7)<=0)
+        p = p + log(2*normpdf(theta(7),0,0.1));
+    else 
+        p = -Inf;
+    end
+end
+%scale ~ N(0,1) T[0,];
+if (nparams>=8)
+    if (theta(8)>=0)
+        p = p + log(2*normpdf(theta(8),0,1.0));
+    else 
+        p = -Inf;
+    end
+end
 %sigma ~ inverse_gamma(a,b)
 a = 3; b=0.5;
-if (nparams>=7)
-    if (theta(7)>=0)
-        p = p + log(inversegammapdf(theta(7),a,b));
+if (nparams>=9)
+    if (theta(9)>=0)
+        p = p + log(inversegammapdf(theta(9),a,b));
     else 
         p = -Inf;
     end
@@ -442,10 +462,10 @@ end
 %----------------------------------------------
 function [pl,ql,pr,qr] = pdex1bc(xl,ul,xr,ur,t,params) % Boundary conditions
 %try robin boundary condition
-pl = params.gamma*ul; %0; %ul;
+pl = params.gamma1*ul; %0; %ul;
 ql = -1; %1; %0
-pr = 0;%ur;
-qr =1; %0;
+pr = params.gamma2*ur; %0;%ur;
+qr = -1; %1; %0;
 end
 
 function L = loglikelihood(data,sim,params)

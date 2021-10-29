@@ -1,4 +1,9 @@
 rng(123);
+run_mcmc = true;
+niter = 10^3;
+identifier = "v132_robin";
+burnin=niter/2;
+nparams=8;
 
 trueparams.lambda = 0.05; %binding rate
 trueparams.D_h = 0.005; %10^(-2); %diffusion const for HURP
@@ -11,7 +16,8 @@ trueparams.nx=51; %number of points in spatial discretization
 trueparams.l_h = 0.5;
 trueparams.v = 0.03;
 trueparams.sigma = 0.01;
-trueparams.gamma = 0.02;
+trueparams.gamma1 = 0.1;
+trueparams.gamma2 = -0.01;
 
 tic; [u_lead_sim,u_trail_sim] = solve_PDE_lead_trail(trueparams); toc;
 %add observation noise
@@ -55,21 +61,16 @@ title('Leading kinetochore (model)');
 %lgd = legend(string(0:9),'Location','west','Orientation','vertical');
 
 set(gcf,'PaperUnits','centimeters','PaperPosition',[0 0 42 21])
-print(sprintf('HURP_PDE_noisy_simulated_data.eps'),'-depsc');
+print(sprintf('HURP_PDE_noisy_simulated_data_%s.eps',identifier),'-depsc');
 
 %%%%%%%%%%%%%%%%%%%%%
 %Now setup MCMC to infer parameters of interest
 %let theta=[l_h,D_h,lambda,mu]; assume we have good estimates of other
 %parameters. Fix these at true values.
-run_mcmc = true;
-niter = 10^3;
-identifier = "v129_robin";
-burnin=niter/2;
-nparams=7;
 
 if run_mcmc
 %    theta0 = [0.5,0.001,0.1,0.1,0.05,0.02];
-    theta0 = [0.5,0.001,0.1,0.1,0.05,0.01,1.0];
+    theta0 = [0.5,0.001,0.1,0.1,0.05,0.1,-0.01,1.0];
     theta_store = NaN(niter,nparams);
     theta = theta0;
     total_acceptances = 0; total_proposals = 0;
@@ -80,7 +81,7 @@ if run_mcmc
     
     while total_acceptances<niter
         %propose new parameters
-        theta_star = proposal(theta,S)
+        theta_star = proposal(theta,S);
         total_proposals = total_proposals + 1;
         
         %solve PDE
@@ -89,10 +90,11 @@ if run_mcmc
         params.lambda = theta_star(3);
         params.mu = theta_star(4);
         params.v = theta_star(5);
-        params.gamma = theta_star(6);
-	params.scale = theta_star(7);
-%        params.sigma = theta_star(8);
-        [u_lead,u_trail] = solve_PDE_lead_trail(params);
+        params.gamma1 = theta_star(6);
+	params.gamma2 = theta_star(7);
+	params.scale = theta_star(8);
+%        params.sigma = theta_star(9);
+       [u_lead,u_trail] = solve_PDE_lead_trail(params);
         
         %evaluate likelihood
         mask_t = 1+(0:9)*5; %subset of time points to evaluate likelihood at
@@ -106,9 +108,10 @@ if run_mcmc
             loglik=loglik_star;
             total_acceptances = total_acceptances + 1;
             theta_store(total_acceptances,:) = theta;
-            if mod(total_acceptances,5)==0
-                fprintf(sprintf('iter %d: accept %f - l_h=%f, D_h=%f,lambda=%f, mu=%f, v=%f, gamma=%f, scale=%f, sigma=%f;\n',...
-                    total_acceptances,total_acceptances/total_proposals,theta(1),theta(2),theta(3),theta(4),params.v,params.gamma,params.scale,params.sigma));
+            if mod(total_acceptances,10)==0
+                fprintf(sprintf('iter %d: accept %f - l_h=%f, D_h=%f,lambda=%f, mu=%f, v=%f, gamma1=%f, gamma2=%f, scale=%f, sigma=%f;\n',...
+                    total_acceptances,total_acceptances/total_proposals,theta(1),theta(2),theta(3),theta(4),...
+		    params.v,params.gamma1,params.gamma2,params.scale,params.sigma));
             end
         end
     end
@@ -118,11 +121,11 @@ if run_mcmc
 else
     load(sprintf('mcmc_output_synthetic_data_%s.mat',identifier))
 end
-param_names = {'l_h','D_h','lambda','mu','v','gamma','scale','sigma'};
+param_names = {'l_h','D_h','lambda','mu','v','gamma1','gamma2','scale','sigma'};
 close all;
 figure;
 trueparams_vec = [trueparams.l_h,trueparams.D_h,trueparams.lambda,...
-    trueparams.mu,trueparams.v,trueparams.gamma,trueparams.scale,trueparams.sigma];
+    trueparams.mu,trueparams.v,trueparams.gamma1,trueparams.gamma2,trueparams.scale,trueparams.sigma];
 for i=1:nparams
     subplot(2,ceil(nparams/2),i);
     histogram(theta_store(:,i),'DisplayStyle','stairs',...
@@ -150,7 +153,7 @@ print(sprintf('posterior_traceplot_synthetic_data_%s.eps',identifier),'-depsc')
 
 function theta_star = proposal(theta,S)
 %random walk proposal on log space
-theta_star = exp(log(theta) + mvnrnd(zeros(length(theta),1),S));
+theta_star = sign(theta).*exp(log(abs(theta)) + mvnrnd(zeros(length(theta),1),S));
 end
 
 function p = prior(theta,nparams)
@@ -186,7 +189,7 @@ if (nparams>=5)
         p = -Inf;
     end
 end
-%gamma ~ N(0,0.1) T[0,];
+%gamma1 ~ N(0,0.1) T[0,];
 if (nparams>=6)
     if (theta(6)>=0)
         p = p + log(2*normpdf(theta(6),0,0.1));
@@ -194,19 +197,27 @@ if (nparams>=6)
 	p = -Inf;
     end
 end
-%scale ~ N(0,1) T[0,];
+%gamma2 ~ N(0,0.1) T[,0];
 if (nparams>=7)
-    if (theta(7)>=0)
-        p = p + log(2*normpdf(theta(7),0,1));
+    if (theta(7)<=0)
+        p = p + log(2*normpdf(theta(7),0,0.1));
+    else 
+	p = -Inf;
+    end
+end
+%scale ~ N(0,1) T[0,];
+if (nparams>=8)
+    if (theta(8)>=0)
+        p = p + log(2*normpdf(theta(8),0,1));
     else 
 	p = -Inf;
     end
 end
 %sigma ~ inverse_gamma(a,b)
 a = 3; b=0.5;
-if (nparams>=8)
-    if (theta(8)>=0)
-        p = p + log(inversegammapdf(theta(8),a,b));
+if (nparams>=9)
+    if (theta(9)>=0)
+        p = p + log(inversegammapdf(theta(9),a,b));
     else 
         p = -Inf;
     end
@@ -418,10 +429,10 @@ end
 %----------------------------------------------
 function [pl,ql,pr,qr] = pdex1bc(xl,ul,xr,ur,t,params) % Boundary conditions
 %try robin boundary condition
-pl = params.gamma*ul; %0; %ul;
+pl = params.gamma1*ul; %0; %ul;
 ql = -1; %1; %0
-pr = 0;%ur;
-qr =1; %0;
+pr = params.gamma2*ur; %0;%ur;
+qr = -1; %1; %0;
 end
 
 function L = loglikelihood(data,sim,params)
