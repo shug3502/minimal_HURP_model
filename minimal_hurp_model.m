@@ -173,7 +173,7 @@ title('Leading kinetochore (model)');
 %lgd = legend(string(0:9),'Location','west','Orientation','vertical');
 
 set(gcf,'PaperUnits','centimeters','PaperPosition',[0 0 42 21])
-print(sprintf('HURP_PDE_solution_gradient_relative_to_chromsomes_%d_%s',...
+print(sprintf('plots/HURP_PDE_solution_gradient_relative_to_chromsomes_%d_%s',...
     params.is_gradient_relative_to_chromosomes,params.gradient_shape),'-depsc')
 
 figure;
@@ -184,7 +184,7 @@ set(gca,'fontsize',font_size);
 xlabel('Length of MNZ and GTP-cap (um)');
 ylabel('Length of HURP gap (um)');
 set(gcf,'PaperUnits','centimeters','PaperPosition',[0 0 21 21])
-print(sprintf('HURP_gap_vs_MNZ_gradient_relative_to_chromosomes_%d_%s',...
+print(sprintf('plots/HURP_gap_vs_MNZ_gradient_relative_to_chromosomes_%d_%s',...
     params.is_gradient_relative_to_chromosomes,params.gradient_shape),'-depsc')
 
 xx = linspace(-params.L,params.L,301);
@@ -194,7 +194,7 @@ set(gca,'fontsize',font_size);
 xlabel('Position along spindle axis (um)');
 ylabel('Ran-GTP (a.u.)');
 set(gcf,'PaperUnits','centimeters','PaperPosition',[0 0 21 21])
-print(sprintf('Ran_gradient_%s',params.gradient_shape),'-depsc')
+print(sprintf('plots/Ran_gradient_%s',params.gradient_shape),'-depsc')
 
 %%%%%%%%%%%%%%%%%%%%%%%
 function rate = lambda(x,l,params)
