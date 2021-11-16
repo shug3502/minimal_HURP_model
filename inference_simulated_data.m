@@ -9,6 +9,7 @@ nx = 51; %number of points in spatial discretization
 L = 3; %domain size (um)
 T = 37; %time duration (s)
 x_0=0; %initial position of chromosomes
+sigma = 0.01; %noise
 
 trueparams.lambda = 0.05; %binding rate
 trueparams.D_h = 0.005; %10^(-2); %diffusion const for HURP
@@ -17,15 +18,14 @@ trueparams.mu = 0.05; %decay rate
 trueparams.l_h = 0.5;
 trueparams.v_plus = 0.03;
 trueparams.v_minus = -0.05;
-trueparams.sigma = 0.01;
 trueparams.gamma1 = 0.1;
 trueparams.gamma2 = -0.01;
 trueparams.lambda_mnz = 0.001;
 trueparams_vec = [trueparams.l_h,trueparams.D_h,trueparams.lambda,trueparams.mu,trueparams.v_plus,trueparams.v_minus,trueparams.gamma1,trueparams.gamma2,trueparams.scale,trueparams.lambda_mnz];
 tic; [u_lead_sim,u_trail_sim] = solve_PDE_lead_trail(trueparams_vec,nx,L,T,x_0); toc;
 %add observation noise
-u_lead_sim = u_lead_sim + trueparams.sigma*randn(size(u_lead_sim));
-u_trail_sim = u_trail_sim + trueparams.sigma*randn(size(u_trail_sim));
+u_lead_sim = u_lead_sim + sigma*randn(size(u_lead_sim));
+u_trail_sim = u_trail_sim + sigma*randn(size(u_trail_sim));
 
 color_mat = [0,0,0
     flipud([255,247,243
@@ -78,60 +78,12 @@ if run_mcmc
     mask_t = 1+(0:9)*5; %subset of time points to evaluate likelihood at
     mask_x = 1+(0:10)*((nx-1)/10); %subset of positions to evaluate likelihood at
 
-%initialise with separate storage for each chain
-theta0 = NaN(nparams,nchains);
-loglik = NaN(1,nchains);
-loglik_star = NaN(1,nchains);
-theta_star = NaN(nparams,nchains);
-%theta = NaN(nparams,nchains);
-%total_acceptances = zeros(1,nchains); total_proposals = zeros(1,nchains); %initialized at 0
-%acceptance_ratio = NaN(1,nchains);
-%u_lead = NaN(nx,50,nchains); u_trail = NaN(nx,50,nchains);
 
 parfor ichain = 1:nchains
-    loglik(ichain) = -Inf;
-    while isinf(loglik(ichain))  %try to initialise somewhere with non-negible posterior mass
-        theta0(:,ichain) = [abs(randn(1)),abs(0.1*randn(1)),abs(randn(1)),abs(randn(1)),gamrnd(5,0.01),-gamrnd(5,0.01),...
-            abs(0.1*randn(1)),-abs(0.1*randn(1)),abs(randn(1)),abs(randn(1))];
-        theta_star(:,ichain)=theta0(:,ichain);
-        %solve PDE
-        [u_lead,u_trail] = solve_PDE_lead_trail(theta_star(:,ichain),nx,L,T,x_0);
-        
-       	%evaluate likelihood
-        loglik(ichain) = loglikelihood(u_lead(mask_t,mask_x),u_lead_sim(mask_t,mask_x),trueparams.sigma) + ...
-            loglikelihood(u_trail(mask_t,mask_x),u_trail_sim(mask_t,mask_x),trueparams.sigma);
-    end
-    theta = theta0(:,ichain);
-    total_acceptances = 0; total_proposals = 0;
-    while total_acceptances<niter
-        %propose new parameters
-        theta_star(:,ichain) = proposal(theta,S);
-        total_proposals = total_proposals + 1;
-        
-        %solve PDE
-       [u_lead,u_trail] = solve_PDE_lead_trail(theta_star(:,ichain),nx,L,T,x_0);
-        
-        %evaluate likelihood
-        loglik_star(ichain) = loglikelihood(u_lead(mask_t,mask_x),u_lead_sim(mask_t,mask_x),trueparams.sigma) + ...
-            loglikelihood(u_trail(mask_t,mask_x),u_trail_sim(mask_t,mask_x),trueparams.sigma);
-        acceptance_ratio(ichain) = (loglik_star(ichain) - loglik(ichain)) + (prior(theta_star(:,ichain),nparams) - prior(theta,nparams));
-        if log(rand(1)) < acceptance_ratio(ichain)
-            %accept
-            theta = theta_star(:,ichain);
-            loglik(ichain)=loglik_star(ichain);
-            total_acceptances = total_acceptances + 1;
-            theta_store(total_acceptances,:,ichain) = theta;
-            if mod(total_acceptances,10)==0
-                fprintf(sprintf('iter %d: accept %f - l_h=%f, D_h=%f,lambda=%f, mu=%f, v_plus=%f, v_minus=%f, gamma1=%f, gamma2=%f, scale=%f, lambda_mnz=%f;\n',...
-                    total_acceptances,total_acceptances/total_proposals,theta(1),theta(2),theta(3),theta(4),...
-		    theta(5),theta(6),theta(7),theta(8),theta(9),theta(10)));
-            end
-        end
-    end
-    fprintf('chain %d: final acceptance rate: %f \n',ichain,total_acceptances/total_proposals);
-    fprintf('chain %d: posterior medians: %f %f %f %f %f %f %f %f %f %f\n', ichain, median(theta_store((burnin+1):niter,:,ichain),1));   
-    save(sprintf('mcmc_output_synthetic_data_%s.mat',identifier))
+theta_store(:,:,ichain) = run_RW_metropolis(ichain,u_lead_sim,u_trail_sim,S,...
+                                mask_x,mask_t,nx,L,T,x_0,sigma,niter,nparams);
 end
+    save(sprintf('mcmc_output_synthetic_data_%s.mat',identifier))
 else
     load(sprintf('mcmc_output_synthetic_data_%s.mat',identifier))
 end
@@ -143,7 +95,7 @@ close all;
 figure;
 trueparams_vec = [trueparams.l_h,trueparams.D_h,trueparams.lambda,...
     trueparams.mu,trueparams.v_plus,trueparams.v_minus,trueparams.gamma1,trueparams.gamma2,...
-    trueparams.scale,trueparams.lambda_mnz,trueparams.sigma];
+    trueparams.scale,trueparams.lambda_mnz,sigma];
 for i=1:nparams
     subplot(2,ceil(nparams/2),i);
     histogram(theta_store_plot(:,i),'DisplayStyle','stairs',...
@@ -491,4 +443,51 @@ function L = loglikelihood(data,sim,sigma)
 %likelihood: product over time and space
 N = size(data,1)*size(data,2);
 L = sum(log(mvnpdf(reshape(data,1,[]),reshape(sim,1,[]),sigma*eye(N))),'all');
+end
+
+function theta_store = run_RW_metropolis(ichain,u_lead_sim,u_trail_sim,S,...
+                                mask_x,mask_t,nx,L,T,x_0,sigma,niter,nparams)
+    theta_store = NaN(niter,nparams);
+    loglik = -Inf;
+    while isinf(loglik)  %try to initialise somewhere with non-negible posterior mass
+        theta0 = [abs(randn(1)),abs(0.1*randn(1)),abs(randn(1)),abs(randn(1)),gamrnd(5,0.01),-gamrnd(5,0.01),...
+            abs(0.1*randn(1)),-abs(0.1*randn(1)),abs(randn(1)),abs(randn(1))];
+        theta_star=theta0;
+        %solve PDE
+        [u_lead,u_trail] = solve_PDE_lead_trail(theta_star,nx,L,T,x_0);
+        
+       	%evaluate likelihood
+        loglik = loglikelihood(u_lead(mask_t,mask_x),u_lead_sim(mask_t,mask_x),sigma) + ...
+            loglikelihood(u_trail(mask_t,mask_x),u_trail_sim(mask_t,mask_x),sigma);
+    end
+    theta = theta0;
+    total_acceptances = 0; total_proposals = 0;
+    while total_acceptances<niter
+        %propose new parameters
+        theta_star = proposal(theta,S);
+        total_proposals = total_proposals + 1;
+        
+        %solve PDE
+       [u_lead,u_trail] = solve_PDE_lead_trail(theta_star,nx,L,T,x_0);
+        
+        %evaluate likelihood
+        loglik_star = loglikelihood(u_lead(mask_t,mask_x),u_lead_sim(mask_t,mask_x),sigma) + ...
+            loglikelihood(u_trail(mask_t,mask_x),u_trail_sim(mask_t,mask_x),sigma);
+        acceptance_ratio = (loglik_star - loglik) + (prior(theta_star,nparams) - prior(theta,nparams));
+        if log(rand(1)) < acceptance_ratio
+            %accept
+            theta = theta_star;
+            loglik=loglik_star;
+            total_acceptances = total_acceptances + 1;
+            theta_store(total_acceptances,:) = theta;
+            if mod(total_acceptances,10)==0
+                fprintf(sprintf('chain %d: iter %d: accept %f - l_h=%f, D_h=%f,lambda=%f, mu=%f, v_plus=%f, v_minus=%f, gamma1=%f, gamma2=%f, scale=%f, lambda_mnz=%f;\n',...
+                    ichain,total_acceptances,total_acceptances/total_proposals,theta(1),theta(2),theta(3),theta(4),...
+		    theta(5),theta(6),theta(7),theta(8),theta(9),theta(10)));
+            end
+        end
+    end
+    burnin=niter/2;
+    fprintf('chain %d: final acceptance rate: %f \n',ichain,total_acceptances/total_proposals);
+    fprintf('chain %d: posterior medians: %f %f %f %f %f %f %f %f %f %f\n', ichain, median(theta_store((burnin+1):niter,:),1));   
 end
