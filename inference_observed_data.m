@@ -12,7 +12,7 @@ params.nx=61; %number of points in spatial discretization
 %params.v = 0.03;
 params.sigma = 0.005;
 
-font_size = 24;
+font_size = 18;
 df = readtable("in_vivo_hurp_switch_data_3_cells.csv"); %in vivo hurp profile data
 %naive background subtraction
 background = min(df.hurp(:));
@@ -29,21 +29,50 @@ end
 %let theta=[l_h,D_h,lambda,mu]; assume we have good estimates of other
 %parameters. Fix these at true values.
 run_mcmc = true;
-niter = 2*10^3;
-identifier = "v134_robin";
+niter = 10^4;
+identifier = "v143_robin_flux_BCs";
 burnin=niter/2;
-nparams=9;
+nparams=10;
+nchains=4;
 
 if run_mcmc
-    theta0 = [0.5,0.001,0.1,0.1,0.03,-0.03,0.1,-0.01,1.0];
-    theta_store = NaN(niter,nparams);
-    theta = theta0;
-    total_acceptances = 0; total_proposals = 0;
+%    theta0 = [0.5,0.001,0.1,0.1,0.03,-0.03,0.1,-0.001,1.0,0.0005];
     S = diag(0.01*ones(nparams,1));
+    theta_store = NaN(niter,nparams,nchains);
+for ichain = 1:nchains
     loglik = -Inf;
+    while isinf(loglik)  %try to initialise somewhere with non-negible posterior mass
+        theta0 = [abs(randn(1)),abs(0.1*randn(1)),abs(randn(1)),abs(randn(1)),gamrnd(5,0.01),-gamrnd(5,0.01),...
+            abs(0.1*randn(1)),-abs(0.1*randn(1)),abs(randn(1)),abs(randn(1))];
+        %theta0 = [abs(randn(1)),abs(0.01*randn(1)),abs(0.1*randn(1)),abs(0.1*randn(1)),gamrnd(5,0.01),-gamrnd(5,0.01),...
+        %    abs(0.1*randn(1)),-abs(0.001*randn(1)),abs(randn(1)),abs(0.001*randn(1))]
+        theta_star=theta0;
+       	%solve PDE
+        params.l_h = theta_star(1);
+        params.D_h = theta_star(2);
+        params.lambda = theta_star(3);
+        params.mu = theta_star(4);
+        params.v_plus = theta_star(5);
+        params.v_minus = theta_star(6);
+        params.gamma1 = theta_star(7);
+        params.gamma2 = theta_star(8);
+        params.scale = theta_star(9);
+        params.lambda_mnz = theta_star(10);
+%        params.sigma = theta_star(10);
+        [u_lead,u_trail] = solve_PDE_lead_trail(params);
+        
+       	%evaluate likelihood
+        mask_t = 1+(0:9)*5; %subset of time points to evaluate likelihood at
+        mask_x = 1:2:(params.nx); %subset of positions to evaluate likelihood at
+        loglik = loglikelihood(u_lead(mask_t,mask_x),u_lead_data,params) + ...
+            loglikelihood(u_trail(mask_t,mask_x),u_trail_data,params);
+    end
+    total_acceptances = 0; total_proposals = 0;
+    theta = theta0;
     while total_acceptances<niter
         %propose new parameters
         theta_star = proposal(theta,S);
+%	total_acceptances
         total_proposals = total_proposals + 1;
         
         %solve PDE
@@ -56,6 +85,7 @@ if run_mcmc
         params.gamma1 = theta_star(7);
 	params.gamma2 = theta_star(8);
         params.scale = theta_star(9);
+	params.lambda_mnz = theta_star(10);
 %        params.sigma = theta_star(10);
         [u_lead,u_trail] = solve_PDE_lead_trail(params);
         
@@ -64,31 +94,35 @@ if run_mcmc
         mask_x = 1:2:(params.nx); %subset of positions to evaluate likelihood at
         loglik_star = loglikelihood(u_lead(mask_t,mask_x),u_lead_data,params) + ...
             loglikelihood(u_trail(mask_t,mask_x),u_trail_data,params);
-        acceptance_ratio = (loglik_star - loglik) + (prior(theta_star,nparams) - prior(theta,nparams));
+        acceptance_ratio = (loglik_star - loglik) + (prior(theta_star,nparams) - prior(theta,nparams))
         if log(rand(1)) < acceptance_ratio
             %accept
             theta = theta_star;
             loglik=loglik_star;
             total_acceptances = total_acceptances + 1;
-            theta_store(total_acceptances,:) = theta;
+            theta_store(total_acceptances,:,ichain) = theta;
             if mod(total_acceptances,10)==0
-                fprintf(sprintf('iter %d: accept %f - l_h=%f, D_h=%f,lambda=%f, mu=%f, v_plus=%f, v_minus=%f, gamma1=%f, gamma2=%f, scale=%f, sigma=%f;\n',...
-                    total_acceptances,total_acceptances/total_proposals,theta(1),theta(2),theta(3),theta(4),params.v_plus,params.v_minus,params.gamma1,params.gamma2,params.scale,params.sigma));
+                fprintf(sprintf('iter %d: accept %f - l_h=%f, D_h=%f,lambda=%f, mu=%f, v_plus=%f, v_minus=%f, gamma1=%f, gamma2=%f, scale=%f, lambda_mnz=%f, sigma=%f;\n',...
+                    total_acceptances,total_acceptances/total_proposals,theta(1),theta(2),theta(3),theta(4),params.v_plus,params.v_minus,params.gamma1,params.gamma2,params.scale,params.lambda_mnz,params.sigma));
             end
         end
     end
-    fprintf('final acceptance rate: %f \n',total_acceptances/total_proposals);
-    fprintf('posterior medians: %f %f %f %f %f \n', median(theta_store((burnin+1):niter,:),1));
+    fprintf('chain %d: final acceptance rate: %f \n',ichain,total_acceptances/total_proposals);
+    fprintf('chain %d: posterior medians: %f %f %f %f %f \n',ichain, median(theta_store((burnin+1):niter,:,ichain),1));
     save(sprintf('mcmc_output_observed_data_%s.mat',identifier));
+end
 else
     load(sprintf('mcmc_output_observed_data_%s.mat',identifier));
 end
-param_names = {'l_h','D_h','lambda','mu','v_plus','v_minus','gamma1','gamma2','scale','sigma'};
+param_names = {'l_h','D_h','lambda','mu','v_+','v_-','gamma1','gamma2','scale','lambda_mnz','sigma'};
+%combine chains for plotting and evaluating
+splitTheta = num2cell(theta_store((burnin+1):niter,:,:), [1 2]); %split A keeping dimension 1 and 2 intact
+theta_store_plot = vertcat(splitTheta{:});
 close all;
 figure;
 for i=1:nparams
     subplot(2,ceil(nparams/2),i);
-    histogram(theta_store((burnin+1):niter,i),'DisplayStyle','stairs',...
+    histogram(theta_store_plot(:,i),'DisplayStyle','stairs',...
         'Normalization','pdf','EdgeColor','k','LineWidth',2);
     xlabel(param_names{i}); ylabel('Density');
     hold all;
@@ -101,9 +135,11 @@ print(sprintf('plots/posterior_histograms_observed_data_%s.eps',identifier),'-de
 figure;
 for i=1:nparams
     subplot(2,ceil(nparams/2),i);
-    plot(1:niter,theta_store(:,i),'k','LineWidth',2);
+for ichain=1:nchains
+    plot(1:niter,theta_store(:,i,ichain),'LineWidth',2);
     xlabel('MCMC iteration'); ylabel(param_names{i});
     hold all;
+end
     %     plot(1:niter,trueparams_vec(i)*ones(niter,1),'r--','linewidth',2);
     set(gca,'fontsize',font_size);
 end
@@ -120,6 +156,7 @@ params.v_minus = median(theta_store((burnin+1):niter,6));
 params.gamma1 = median(theta_store((burnin+1):niter,7));
 params.gamma2 = median(theta_store((burnin+1):niter,8));
 params.scale = median(theta_store((burnin+1):niter,9));
+params.lambda_mnz = median(theta_store((burnin+1):niter,10));
 [u_lead_post,u_trail_post] = solve_PDE_lead_trail(params);
 
 color_mat = [0,0,0
@@ -215,18 +252,20 @@ if theta(4)>=0
 else 
     p = -Inf;
 end
-%v_plus ~ N(0,0.1) T[0,];
+%v_plus ~ gamma(5,0.01) %N(0,0.1) T[0,];
 if (nparams>=5)
     if (theta(5)>=0)
-        p = p + log(2*normpdf(theta(5),0,0.1));
+%        p = p + log(2*normpdf(theta(5),0,0.1));
+         p = p + log(gampdf(theta(5),5,0.01));
     else 
         p = -Inf;
     end
 end
-%v_minus ~ N(0,0.1) T[,0];
+%v_minus ~ -gamma(5,0.01) %N(0,0.1) T[,0];
 if (nparams>=6)
     if (theta(6)<=0)
-        p = p + log(2*normpdf(theta(6),0,0.1));
+%        p = p + log(2*normpdf(theta(6),0,0.1));
+         p = p + log(gampdf(-theta(6),5,0.01));
     else 
 	p = -Inf;
     end
@@ -255,11 +294,19 @@ if (nparams>=9)
         p = -Inf;
     end
 end
-%sigma ~ inverse_gamma(a,b)
-a = 3; b=0.5;
+%lambda_mnz ~ N(0,1) T[0,];
 if (nparams>=10)
     if (theta(10)>=0)
-        p = p + log(inversegammapdf(theta(10),a,b));
+        p = p + log(2*normpdf(theta(10),0,1.0));
+    else 
+	p = -Inf;
+    end
+end
+%sigma ~ inverse_gamma(a,b)
+a = 3; b=0.5;
+if (nparams>=11)
+    if (theta(11)>=0)
+        p = p + log(inversegammapdf(theta(11),a,b));
     else 
         p = -Inf;
     end
@@ -287,7 +334,7 @@ t = linspace(0,params.T,50);
 %trailing kinetochore
 params.mu_gtp = params.mu;
 params.mu_gdp = params.mu;
-params.lambda_gtp=0; %allow preferential binding to gdp tubulin
+params.lambda_gtp=params.lambda_mnz; %allow preferential binding to gdp tubulin
 params.lambda_gdp=params.lambda; % only part to change is the binding in the MNZ/GTP cap region
 params.is_gradient_relative_to_chromosomes=0;
 params.gradient_shape = "exponential"; %"flat top", "linear bump", "exponential"
@@ -317,7 +364,7 @@ sol = pdepe(m,fun,init_fun_lead,bc_fun,x,t);
 u_lead = sol(:,:,1);
 
 %for trailing kinetochore sister
-params.lambda_gtp=0; % define parameters here
+params.lambda_gtp=params.lambda_mnz; % define parameters here
 params.lambda_gdp=params.lambda; % only part to change is the binding in the gtp region
 params.v = params.v_plus;
 params.mu_gtp = params.mu;
@@ -474,7 +521,7 @@ function [pl,ql,pr,qr] = pdex1bc(xl,ul,xr,ur,t,params) % Boundary conditions
 %try robin boundary condition
 pl = params.gamma1*ul; %0; %ul;
 ql = -1; %1; %0
-pr = params.gamma2*ur; %0;%ur;
+pr = params.gamma2; %0;%ur;
 qr = -1; %1; %0;
 end
 

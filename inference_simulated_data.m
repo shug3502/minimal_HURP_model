@@ -1,26 +1,28 @@
 rng(123);
 run_mcmc = true;
-niter = 2*10^3;
-identifier = "v134_robin";
+niter = 10^3;
+identifier = "v144_robin_10params";
 burnin=niter/2;
-nparams=9;
+nparams=10;
+nchains=4;
+nx = 51; %number of points in spatial discretization
+L = 3; %domain size (um)
+T = 37; %time duration (s)
+x_0=0; %initial position of chromosomes
 
 trueparams.lambda = 0.05; %binding rate
 trueparams.D_h = 0.005; %10^(-2); %diffusion const for HURP
 trueparams.scale = 1.0; %spatial scale for Ran GTP gradient
 trueparams.mu = 0.05; %decay rate
-trueparams.L = 3; %domain size (um)
-trueparams.T = 37; %time duration (s)
-trueparams.x_0=0; %initial position of chromosomes
-trueparams.nx=51; %number of points in spatial discretization
 trueparams.l_h = 0.5;
 trueparams.v_plus = 0.03;
 trueparams.v_minus = -0.05;
 trueparams.sigma = 0.01;
 trueparams.gamma1 = 0.1;
 trueparams.gamma2 = -0.01;
-
-tic; [u_lead_sim,u_trail_sim] = solve_PDE_lead_trail(trueparams); toc;
+trueparams.lambda_mnz = 0.001;
+trueparams_vec = [trueparams.l_h,trueparams.D_h,trueparams.lambda,trueparams.mu,trueparams.v_plus,trueparams.v_minus,trueparams.gamma1,trueparams.gamma2,trueparams.scale,trueparams.lambda_mnz];
+tic; [u_lead_sim,u_trail_sim] = solve_PDE_lead_trail(trueparams_vec,nx,L,T,x_0); toc;
 %add observation noise
 u_lead_sim = u_lead_sim + trueparams.sigma*randn(size(u_lead_sim));
 u_trail_sim = u_trail_sim + trueparams.sigma*randn(size(u_trail_sim));
@@ -36,9 +38,9 @@ color_mat = [0,0,0
     122,1,119
     73,0,106]/256)];
 
-font_size = 24;
+font_size = 18;
 figure;
-x = linspace(0,trueparams.L,trueparams.nx);
+x = linspace(0,L,nx);
 subplot(1,2,1);
 box on;
 hold all;
@@ -70,67 +72,81 @@ print(sprintf('plots/HURP_PDE_noisy_simulated_data_%s.eps',identifier),'-depsc')
 %parameters. Fix these at true values.
 
 if run_mcmc
-%    theta0 = [0.5,0.001,0.1,0.1,0.05,0.02];
-    theta0 = [0.5,0.001,0.1,0.1,0.05,-0.05,0.1,-0.01,1.0];
-    theta_store = NaN(niter,nparams);
-    theta = theta0;
-    total_acceptances = 0; total_proposals = 0;
+%    theta0 = [0.5,0.001,0.1,0.1,0.05,-0.05,0.1,-0.01,1.0,0.0005];
+    theta_store = NaN(niter,nparams,nchains);
     S = diag(0.01*ones(nparams,1));
-    loglik = -Inf;
-    
-    params=trueparams;
-    
+    mask_t = 1+(0:9)*5; %subset of time points to evaluate likelihood at
+    mask_x = 1+(0:10)*((nx-1)/10); %subset of positions to evaluate likelihood at
+
+%initialise with separate storage for each chain
+theta0 = NaN(nparams,nchains);
+loglik = NaN(1,nchains);
+loglik_star = NaN(1,nchains);
+theta_star = NaN(nparams,nchains);
+%theta = NaN(nparams,nchains);
+%total_acceptances = zeros(1,nchains); total_proposals = zeros(1,nchains); %initialized at 0
+%acceptance_ratio = NaN(1,nchains);
+%u_lead = NaN(nx,50,nchains); u_trail = NaN(nx,50,nchains);
+
+parfor ichain = 1:nchains
+    loglik(ichain) = -Inf;
+    while isinf(loglik(ichain))  %try to initialise somewhere with non-negible posterior mass
+        theta0(:,ichain) = [abs(randn(1)),abs(0.1*randn(1)),abs(randn(1)),abs(randn(1)),gamrnd(5,0.01),-gamrnd(5,0.01),...
+            abs(0.1*randn(1)),-abs(0.1*randn(1)),abs(randn(1)),abs(randn(1))];
+        theta_star(:,ichain)=theta0(:,ichain);
+        %solve PDE
+        [u_lead,u_trail] = solve_PDE_lead_trail(theta_star(:,ichain),nx,L,T,x_0);
+        
+       	%evaluate likelihood
+        loglik(ichain) = loglikelihood(u_lead(mask_t,mask_x),u_lead_sim(mask_t,mask_x),trueparams.sigma) + ...
+            loglikelihood(u_trail(mask_t,mask_x),u_trail_sim(mask_t,mask_x),trueparams.sigma);
+    end
+    theta = theta0(:,ichain);
+    total_acceptances = 0; total_proposals = 0;
     while total_acceptances<niter
         %propose new parameters
-        theta_star = proposal(theta,S);
+        theta_star(:,ichain) = proposal(theta,S);
         total_proposals = total_proposals + 1;
         
         %solve PDE
-        params.l_h = theta_star(1);
-        params.D_h = theta_star(2);
-        params.lambda = theta_star(3);
-        params.mu = theta_star(4);
-        params.v_plus = theta_star(5);
-	params.v_minus = theta_star(6);
-        params.gamma1 = theta_star(7);
-	params.gamma2 = theta_star(8);
-	params.scale = theta_star(9);
-%        params.sigma = theta_star(10);
-       [u_lead,u_trail] = solve_PDE_lead_trail(params);
+       [u_lead,u_trail] = solve_PDE_lead_trail(theta_star(:,ichain),nx,L,T,x_0);
         
         %evaluate likelihood
-        mask_t = 1+(0:9)*5; %subset of time points to evaluate likelihood at
-        mask_x = 1+(0:10)*((trueparams.nx-1)/10); %subset of positions to evaluate likelihood at
-        loglik_star = loglikelihood(u_lead(mask_t,mask_x),u_lead_sim(mask_t,mask_x),params) + ...
-            loglikelihood(u_trail(mask_t,mask_x),u_trail_sim(mask_t,mask_x),params);
-        acceptance_ratio = (loglik_star - loglik) + (prior(theta_star,nparams) - prior(theta,nparams));
-        if log(rand(1)) < acceptance_ratio
+        loglik_star(ichain) = loglikelihood(u_lead(mask_t,mask_x),u_lead_sim(mask_t,mask_x),trueparams.sigma) + ...
+            loglikelihood(u_trail(mask_t,mask_x),u_trail_sim(mask_t,mask_x),trueparams.sigma);
+        acceptance_ratio(ichain) = (loglik_star(ichain) - loglik(ichain)) + (prior(theta_star(:,ichain),nparams) - prior(theta,nparams));
+        if log(rand(1)) < acceptance_ratio(ichain)
             %accept
-            theta = theta_star;
-            loglik=loglik_star;
+            theta = theta_star(:,ichain);
+            loglik(ichain)=loglik_star(ichain);
             total_acceptances = total_acceptances + 1;
-            theta_store(total_acceptances,:) = theta;
+            theta_store(total_acceptances,:,ichain) = theta;
             if mod(total_acceptances,10)==0
-                fprintf(sprintf('iter %d: accept %f - l_h=%f, D_h=%f,lambda=%f, mu=%f, v_plus=%f, v_minus=%f, gamma1=%f, gamma2=%f, scale=%f, sigma=%f;\n',...
+                fprintf(sprintf('iter %d: accept %f - l_h=%f, D_h=%f,lambda=%f, mu=%f, v_plus=%f, v_minus=%f, gamma1=%f, gamma2=%f, scale=%f, lambda_mnz=%f;\n',...
                     total_acceptances,total_acceptances/total_proposals,theta(1),theta(2),theta(3),theta(4),...
-		    params.v_plus,params.v_minus,params.gamma1,params.gamma2,params.scale,params.sigma));
+		    theta(5),theta(6),theta(7),theta(8),theta(9),theta(10)));
             end
         end
     end
-    fprintf('final acceptance rate: %f \n',total_acceptances/total_proposals);
-    fprintf('posterior medians: %f %f %f %f %f %f %f %f %f\n', median(theta_store((burnin+1):niter,:),1));   
+    fprintf('chain %d: final acceptance rate: %f \n',ichain,total_acceptances/total_proposals);
+    fprintf('chain %d: posterior medians: %f %f %f %f %f %f %f %f %f %f\n', ichain, median(theta_store((burnin+1):niter,:,ichain),1));   
     save(sprintf('mcmc_output_synthetic_data_%s.mat',identifier))
+end
 else
     load(sprintf('mcmc_output_synthetic_data_%s.mat',identifier))
 end
-param_names = {'l_h','D_h','lambda','mu','v_+','v_-','gamma1','gamma2','scale','sigma'};
+param_names = {'l_h','D_h','lambda','mu','v_+','v_-','gamma1','gamma2','scale','lambda_mnz','sigma'};
+%combine chains for plotting and evaluating
+splitTheta = num2cell(theta_store((burnin+1):niter,:,:), [1 2]); %split A keeping dimension 1 and 2 intact
+theta_store_plot = vertcat(splitTheta{:}); %see eg here https://uk.mathworks.com/matlabcentral/answers/295692-concatenate-vertically-along-the-3rd-dimension-of-a-matrix
 close all;
 figure;
 trueparams_vec = [trueparams.l_h,trueparams.D_h,trueparams.lambda,...
-    trueparams.mu,trueparams.v_plus,trueparams.v_minus,trueparams.gamma1,trueparams.gamma2,trueparams.scale,trueparams.sigma];
+    trueparams.mu,trueparams.v_plus,trueparams.v_minus,trueparams.gamma1,trueparams.gamma2,...
+    trueparams.scale,trueparams.lambda_mnz,trueparams.sigma];
 for i=1:nparams
     subplot(2,ceil(nparams/2),i);
-    histogram(theta_store(:,i),'DisplayStyle','stairs',...
+    histogram(theta_store_plot(:,i),'DisplayStyle','stairs',...
         'Normalization','pdf','EdgeColor','k','LineWidth',2);
     xlabel(param_names{i}); ylabel('Density');
     hold all;
@@ -143,9 +159,11 @@ print(sprintf('plots/posterior_histograms_synthetic_data_%s.eps',identifier),'-d
 figure;
 for i=1:nparams
     subplot(2,ceil(nparams/2),i);
-    plot(1:niter,theta_store(:,i),'k','LineWidth',2);
-    xlabel('MCMC iteration'); ylabel(param_names{i});
-    hold all;
+    for ichain=1:nchains
+        plot(1:niter,theta_store(:,i,ichain),'LineWidth',2);
+        xlabel('MCMC iter'); ylabel(param_names{i});
+        hold all;
+    end
     plot(1:niter,trueparams_vec(i)*ones(niter,1),'r--','linewidth',2);
     set(gca,'fontsize',font_size);
 end
@@ -183,18 +201,20 @@ if theta(4)>=0
 else 
     p = -Inf;
 end
-%v_plus ~ N(0,0.1) T[0,];
+%v_plus ~ gamma(5,0.01) %N(0,0.1) T[0,];
 if (nparams>=5)
     if (theta(5)>=0)
-        p = p + log(2*normpdf(theta(5),0,0.1));
+%        p = p + log(2*normpdf(theta(5),0,0.1));
+         p = p + log(gampdf(theta(5),5,0.01));
     else 
-        p = -Inf;
+	p = -Inf;
     end
 end
-%v_minus ~ N(0,0.1) T[,0];
+%v_minus ~ -gamma(5,0.01) %N(0,0.1) T[,0];
 if (nparams>=6)
     if (theta(6)<=0)
-        p = p + log(2*normpdf(theta(6),0,0.1));
+%        p = p + log(2*normpdf(theta(6),0,0.1));
+         p = p + log(gampdf(-theta(6),5,0.01));
     else 
 	p = -Inf;
     end
@@ -223,11 +243,19 @@ if (nparams>=9)
 	p = -Inf;
     end
 end
-%sigma ~ inverse_gamma(a,b)
-a = 3; b=0.5;
+%lambda_mnz ~ N(0,1) T[0,];
 if (nparams>=10)
     if (theta(10)>=0)
-        p = p + log(inversegammapdf(theta(10),a,b));
+        p = p + log(2*normpdf(theta(10),0,1));
+    else
+        p = -Inf;
+    end
+end
+%sigma ~ inverse_gamma(a,b)
+a = 3; b=0.5;
+if (nparams>=11)
+    if (theta(11)>=0)
+        p = p + log(inversegammapdf(theta(11),a,b));
     else 
         p = -Inf;
     end
@@ -247,7 +275,21 @@ Y = B^A/gamma(A)*X.^(-A-1).*exp(-B./X);
 end
 
 
-function [u_lead,u_trail] = solve_PDE_lead_trail(params)
+function [u_lead,u_trail] = solve_PDE_lead_trail(params_vec,nx,L,T,x_0)
+        params.l_h = params_vec(1);
+        params.D_h = params_vec(2);
+        params.lambda = params_vec(3);
+        params.mu = params_vec(4);
+        params.v_plus = params_vec(5);
+        params.v_minus = params_vec(6);
+        params.gamma1 = params_vec(7);
+        params.gamma2 = params_vec(8);
+        params.scale = params_vec(9);
+        params.lambda_mnz = params_vec(10);
+	params.nx=nx;
+	params.L=L;
+	params.T=T;
+	params.x_0=x_0;
 x = linspace(0,params.L,params.nx);
 t = linspace(0,params.T,50);
 %v=params.v; %speed of chromosome movements
@@ -255,7 +297,7 @@ t = linspace(0,params.T,50);
 %trailing kinetochore
 params.mu_gtp = params.mu;
 params.mu_gdp = params.mu;
-params.lambda_gtp=0; %allow preferential binding to gdp tubulin
+params.lambda_gtp=params.lambda_mnz; %allow preferential binding to gdp tubulin
 params.lambda_gdp=params.lambda; % only part to change is the binding in the MNZ/GTP cap region
 params.is_gradient_relative_to_chromosomes=0;
 params.gradient_shape = "exponential"; %"flat top", "linear bump", "exponential"
@@ -284,7 +326,7 @@ sol = pdepe(m,fun,init_fun_lead,bc_fun,x,t);
 u_lead = sol(:,:,1);
 
 %for trailing kinetochore sister
-params.lambda_gtp=0; % define parameters here
+params.lambda_gtp=params.lambda_mnz; % define parameters here
 params.lambda_gdp=params.lambda; % only part to change is the binding in the gtp region
 params.v = params.v_plus; %v;
 params.mu_gtp = params.mu;
@@ -408,9 +450,9 @@ function b = binding_fun(x,u,t,params)
 %lambda(x)*g(x) - mu(x)
 l_h = params.l_h;
 v = params.v*(1-params.is_gradient_relative_to_chromosomes); %to switch between case where gradient moves due to chromosomes moving or not
-x_0 = params.x_0;
+x0 = params.x_0;
 
-b = lambda(x,l_h,params)*ran_gradient(x+x_0+v*t,params) - decay_rate(x,l_h,params)*u;
+b = lambda(x,l_h,params)*ran_gradient(x+x0+v*t,params) - decay_rate(x,l_h,params)*u;
 end
 function [c,f,s] = pdex1pde(x,t,u,dudx,params) % Equation to solve
 D_h = params.D_h; %diffusion const for HURP
@@ -445,8 +487,8 @@ pr = params.gamma2*ur; %0;%ur;
 qr = -1; %1; %0;
 end
 
-function L = loglikelihood(data,sim,params)
+function L = loglikelihood(data,sim,sigma)
 %likelihood: product over time and space
 N = size(data,1)*size(data,2);
-L = sum(log(mvnpdf(reshape(data,1,[]),reshape(sim,1,[]),params.sigma*eye(N))),'all');
+L = sum(log(mvnpdf(reshape(data,1,[]),reshape(sim,1,[]),sigma*eye(N))),'all');
 end
