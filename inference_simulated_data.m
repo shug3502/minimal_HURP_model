@@ -1,7 +1,7 @@
 rng(123);
 run_mcmc = true;
-niter = 5000;
-identifier = "v144_robin_10params";
+niter = 10^4;
+identifier = "v145_robin_10params";
 ntune = round(niter/10);
 burnin=niter/2;
 nparams=10;
@@ -144,10 +144,6 @@ function theta_star = proposal(theta,S)
 %random walk proposal on log space
 theta_star = sign(theta).*exp(log(abs(theta)) + mvnrnd(zeros(length(theta),1),S));
 end
-% function theta_star = proposal(theta,S)
-% %random walk proposal
-% theta_star = sign(theta).*abs(theta + mvnrnd(zeros(length(theta),1),S));
-% end
 
 function p = prior(theta,nparams)
 %l_h ~ N(0,1) T[0,];
