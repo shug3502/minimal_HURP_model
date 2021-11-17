@@ -1,7 +1,8 @@
 rng(123);
 run_mcmc = true;
-niter = 10^3;
+niter = 5000;
 identifier = "v144_robin_10params";
+ntune = round(niter/10);
 burnin=niter/2;
 nparams=10;
 nchains=4;
@@ -72,17 +73,33 @@ print(sprintf('plots/HURP_PDE_noisy_simulated_data_%s.eps',identifier),'-depsc')
 %parameters. Fix these at true values.
 
 if run_mcmc
-%    theta0 = [0.5,0.001,0.1,0.1,0.05,-0.05,0.1,-0.01,1.0,0.0005];
+    %    theta0 = [0.5,0.001,0.1,0.1,0.05,-0.05,0.1,-0.01,1.0,0.0005];
     theta_store = NaN(niter,nparams,nchains);
+    theta_tune = NaN(ntune,nparams,nchains);
     S = diag(0.01*ones(nparams,1));
     mask_t = 1+(0:9)*5; %subset of time points to evaluate likelihood at
     mask_x = 1+(0:10)*((nx-1)/10); %subset of positions to evaluate likelihood at
-
-
-parfor ichain = 1:nchains
-theta_store(:,:,ichain) = run_RW_metropolis(ichain,u_lead_sim,u_trail_sim,S,...
-                                mask_x,mask_t,nx,L,T,x_0,sigma,niter,nparams);
-end
+%    S_opt = S;
+    
+    %pilot run to tune proposal
+    parfor ichain=1:nchains
+        theta_tune(:,:,ichain) = run_RW_metropolis(ichain,u_lead_sim,u_trail_sim,S,...
+            mask_x,mask_t,nx,L,T,x_0,sigma,ntune,nparams,[]);
+    end
+%    theta_store(1:ntune,:,:) = theta_tune;
+    splitTheta = num2cell(theta_tune, [1 2]); %split A keeping dimension 1 and 2 intact
+    pooled_theta = vertcat(splitTheta{:}); %see eg here https://uk.mathworks.com/matlabcentral/answers/295692-concatenate-vertically-along-the-3rd-dimension-of-a-matrix
+    S_hat = cov(log(abs(pooled_theta)));
+    S_opt = (((2.38)^2)/nparams)*S_hat;
+    diag(S_opt)
+    scaling_factor = 20;    
+    S_opt = S_opt/scaling_factor;
+    parfor ichain = 1:nchains
+        theta_store(:,:,ichain) = [theta_tune(:,:,ichain); ...
+            run_RW_metropolis(ichain,u_lead_sim,u_trail_sim,S_opt,...
+            mask_x,mask_t,nx,L,T,x_0,sigma,niter-ntune,nparams,...
+        theta_tune(end,:,ichain))];
+    end
     save(sprintf('mcmc_output_synthetic_data_%s.mat',identifier))
 else
     load(sprintf('mcmc_output_synthetic_data_%s.mat',identifier))
@@ -127,72 +144,76 @@ function theta_star = proposal(theta,S)
 %random walk proposal on log space
 theta_star = sign(theta).*exp(log(abs(theta)) + mvnrnd(zeros(length(theta),1),S));
 end
+% function theta_star = proposal(theta,S)
+% %random walk proposal
+% theta_star = sign(theta).*abs(theta + mvnrnd(zeros(length(theta),1),S));
+% end
 
 function p = prior(theta,nparams)
 %l_h ~ N(0,1) T[0,];
 if theta(1)>=0
     p = log(2*normpdf(theta(1))); %standard normal
-else 
+else
     p = -Inf;
 end
 %D_h ~ N(0,0.1) T[0,];
 if theta(2)>=0
     p = p + log(2*normpdf(theta(2),0,0.1));
-else 
+else
     p = -Inf;
 end
 %lambda ~ N(0,1) T[0,];
 if theta(3)>=0
     p = p + log(2*normpdf(theta(3),0,1));
-else 
+else
     p = -Inf;
 end
 %mu ~ N(0,1) T[0,];
 if theta(4)>=0
     p = p + log(2*normpdf(theta(4),0,1));
-else 
+else
     p = -Inf;
 end
 %v_plus ~ gamma(5,0.01) %N(0,0.1) T[0,];
 if (nparams>=5)
     if (theta(5)>=0)
-%        p = p + log(2*normpdf(theta(5),0,0.1));
-         p = p + log(gampdf(theta(5),5,0.01));
-    else 
-	p = -Inf;
+        %        p = p + log(2*normpdf(theta(5),0,0.1));
+        p = p + log(gampdf(theta(5),5,0.01));
+    else
+        p = -Inf;
     end
 end
 %v_minus ~ -gamma(5,0.01) %N(0,0.1) T[,0];
 if (nparams>=6)
     if (theta(6)<=0)
-%        p = p + log(2*normpdf(theta(6),0,0.1));
-         p = p + log(gampdf(-theta(6),5,0.01));
-    else 
-	p = -Inf;
+        %        p = p + log(2*normpdf(theta(6),0,0.1));
+        p = p + log(gampdf(-theta(6),5,0.01));
+    else
+        p = -Inf;
     end
 end
 %gamma1 ~ N(0,0.1) T[0,];
 if (nparams>=7)
     if (theta(7)>=0)
         p = p + log(2*normpdf(theta(7),0,0.1));
-    else 
-	p = -Inf;
+    else
+        p = -Inf;
     end
 end
 %gamma2 ~ N(0,0.1) T[,0];
 if (nparams>=8)
     if (theta(8)<=0)
         p = p + log(2*normpdf(theta(8),0,0.1));
-    else 
-	p = -Inf;
+    else
+        p = -Inf;
     end
 end
 %scale ~ N(0,1) T[0,];
 if (nparams>=9)
     if (theta(9)>=0)
         p = p + log(2*normpdf(theta(9),0,1));
-    else 
-	p = -Inf;
+    else
+        p = -Inf;
     end
 end
 %lambda_mnz ~ N(0,1) T[0,];
@@ -208,7 +229,7 @@ a = 3; b=0.5;
 if (nparams>=11)
     if (theta(11)>=0)
         p = p + log(inversegammapdf(theta(11),a,b));
-    else 
+    else
         p = -Inf;
     end
 end
@@ -228,20 +249,20 @@ end
 
 
 function [u_lead,u_trail] = solve_PDE_lead_trail(params_vec,nx,L,T,x_0)
-        params.l_h = params_vec(1);
-        params.D_h = params_vec(2);
-        params.lambda = params_vec(3);
-        params.mu = params_vec(4);
-        params.v_plus = params_vec(5);
-        params.v_minus = params_vec(6);
-        params.gamma1 = params_vec(7);
-        params.gamma2 = params_vec(8);
-        params.scale = params_vec(9);
-        params.lambda_mnz = params_vec(10);
-	params.nx=nx;
-	params.L=L;
-	params.T=T;
-	params.x_0=x_0;
+params.l_h = params_vec(1);
+params.D_h = params_vec(2);
+params.lambda = params_vec(3);
+params.mu = params_vec(4);
+params.v_plus = params_vec(5);
+params.v_minus = params_vec(6);
+params.gamma1 = params_vec(7);
+params.gamma2 = params_vec(8);
+params.scale = params_vec(9);
+params.lambda_mnz = params_vec(10);
+params.nx=nx;
+params.L=L;
+params.T=T;
+params.x_0=x_0;
 x = linspace(0,params.L,params.nx);
 t = linspace(0,params.T,50);
 %v=params.v; %speed of chromosome movements
@@ -424,13 +445,7 @@ function u0 = pdex1ic(xq,u_final,params) % Initial conditions
 x = linspace(0,params.L,params.nx);
 u0 = interp1(x,u_final,xq);
 end
-% function u0 = trailic(x,params) % Initial conditions
-% hstar = steady_state_of_hurp_model(params);
-% u0=hstar(x);
-%
-% %u0 = exp(-x/0.1);
-% end
-%----------------------------------------------
+%------------------------------------
 function [pl,ql,pr,qr] = pdex1bc(xl,ul,xr,ur,t,params) % Boundary conditions
 %try robin boundary condition
 pl = params.gamma1*ul; %0; %ul;
@@ -446,48 +461,50 @@ L = sum(log(mvnpdf(reshape(data,1,[]),reshape(sim,1,[]),sigma*eye(N))),'all');
 end
 
 function theta_store = run_RW_metropolis(ichain,u_lead_sim,u_trail_sim,S,...
-                                mask_x,mask_t,nx,L,T,x_0,sigma,niter,nparams)
-    theta_store = NaN(niter,nparams);
-    loglik = -Inf;
+    mask_x,mask_t,nx,L,T,x_0,sigma,niter,nparams,theta0)
+theta_store = NaN(niter,nparams);
+loglik = -Inf;
+if isempty(theta0) %either draw repeatedly from prior, or restart from existing chain
     while isinf(loglik)  %try to initialise somewhere with non-negible posterior mass
-        theta0 = [abs(randn(1)),abs(0.1*randn(1)),abs(randn(1)),abs(randn(1)),gamrnd(5,0.01),-gamrnd(5,0.01),...
-            abs(0.1*randn(1)),-abs(0.1*randn(1)),abs(randn(1)),abs(randn(1))];
-        theta_star=theta0;
-        %solve PDE
-        [u_lead,u_trail] = solve_PDE_lead_trail(theta_star,nx,L,T,x_0);
-        
-       	%evaluate likelihood
-        loglik = loglikelihood(u_lead(mask_t,mask_x),u_lead_sim(mask_t,mask_x),sigma) + ...
-            loglikelihood(u_trail(mask_t,mask_x),u_trail_sim(mask_t,mask_x),sigma);
+    theta0 = [abs(randn(1)),abs(0.1*randn(1)),abs(randn(1)),abs(randn(1)),gamrnd(5,0.01),-gamrnd(5,0.01),...
+        abs(0.1*randn(1)),-abs(0.1*randn(1)),abs(randn(1)),abs(randn(1))];
+    theta_star=theta0;
+    %solve PDE
+    [u_lead,u_trail] = solve_PDE_lead_trail(theta_star,nx,L,T,x_0);
+    
+    %evaluate likelihood
+    loglik = loglikelihood(u_lead(mask_t,mask_x),u_lead_sim(mask_t,mask_x),sigma) + ...
+        loglikelihood(u_trail(mask_t,mask_x),u_trail_sim(mask_t,mask_x),sigma);
     end
-    theta = theta0;
-    total_acceptances = 0; total_proposals = 0;
-    while total_acceptances<niter
-        %propose new parameters
-        theta_star = proposal(theta,S);
-        total_proposals = total_proposals + 1;
-        
-        %solve PDE
-       [u_lead,u_trail] = solve_PDE_lead_trail(theta_star,nx,L,T,x_0);
-        
-        %evaluate likelihood
-        loglik_star = loglikelihood(u_lead(mask_t,mask_x),u_lead_sim(mask_t,mask_x),sigma) + ...
-            loglikelihood(u_trail(mask_t,mask_x),u_trail_sim(mask_t,mask_x),sigma);
-        acceptance_ratio = (loglik_star - loglik) + (prior(theta_star,nparams) - prior(theta,nparams));
-        if log(rand(1)) < acceptance_ratio
-            %accept
-            theta = theta_star;
-            loglik=loglik_star;
-            total_acceptances = total_acceptances + 1;
-            theta_store(total_acceptances,:) = theta;
-            if mod(total_acceptances,10)==0
-                fprintf(sprintf('chain %d: iter %d: accept %f - l_h=%f, D_h=%f,lambda=%f, mu=%f, v_plus=%f, v_minus=%f, gamma1=%f, gamma2=%f, scale=%f, lambda_mnz=%f;\n',...
-                    ichain,total_acceptances,total_acceptances/total_proposals,theta(1),theta(2),theta(3),theta(4),...
-		    theta(5),theta(6),theta(7),theta(8),theta(9),theta(10)));
-            end
+end
+theta = theta0;
+total_acceptances = 0; total_proposals = 0;
+while total_acceptances<niter
+    %propose new parameters
+    theta_star = proposal(theta,S);
+    total_proposals = total_proposals + 1;
+    
+    %solve PDE
+    [u_lead,u_trail] = solve_PDE_lead_trail(theta_star,nx,L,T,x_0);
+    
+    %evaluate likelihood
+    loglik_star = loglikelihood(u_lead(mask_t,mask_x),u_lead_sim(mask_t,mask_x),sigma) + ...
+        loglikelihood(u_trail(mask_t,mask_x),u_trail_sim(mask_t,mask_x),sigma);
+    acceptance_ratio = (loglik_star - loglik) + (prior(theta_star,nparams) - prior(theta,nparams));
+    if log(rand(1)) < acceptance_ratio
+        %accept
+        theta = theta_star;
+        loglik=loglik_star;
+        total_acceptances = total_acceptances + 1;
+        theta_store(total_acceptances,:) = theta;
+        if mod(total_acceptances,10)==0
+            fprintf(sprintf('chain %d: iter %d: accept %f - l_h=%f, D_h=%f,lambda=%f, mu=%f, v_plus=%f, v_minus=%f, gamma1=%f, gamma2=%f, scale=%f, lambda_mnz=%f;\n',...
+                ichain,total_acceptances,total_acceptances/total_proposals,theta(1),theta(2),theta(3),theta(4),...
+                theta(5),theta(6),theta(7),theta(8),theta(9),theta(10)));
         end
     end
-    burnin=niter/2;
-    fprintf('chain %d: final acceptance rate: %f \n',ichain,total_acceptances/total_proposals);
-    fprintf('chain %d: posterior medians: %f %f %f %f %f %f %f %f %f %f\n', ichain, median(theta_store((burnin+1):niter,:),1));   
+end
+burnin=niter/2;
+fprintf('chain %d: final acceptance rate: %f \n',ichain,total_acceptances/total_proposals);
+fprintf('chain %d: posterior medians: %f %f %f %f %f %f %f %f %f %f\n', ichain, median(theta_store((burnin+1):niter,:),1));
 end
