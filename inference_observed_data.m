@@ -1,5 +1,5 @@
 rng(123)
-run_mcmc = true;
+run_mcmc = false;
 niter = 10^4;
 identifier = "v145_robin_flux_BCs";
 burnin=niter/2;
@@ -94,17 +94,7 @@ set(gcf,'PaperUnits','centimeters','PaperPosition',[0 0 42 21])
 print(sprintf('plots/posterior_traceplot_observed_data_%s.eps',identifier),'-depsc')
 
 %simulate data with posterior median parameters
-params.l_h = median(theta_store((burnin+1):niter,1));
-params.D_h = median(theta_store((burnin+1):niter,2));
-params.lambda = median(theta_store((burnin+1):niter,3));
-params.mu = median(theta_store((burnin+1):niter,4));
-params.v_plus = median(theta_store((burnin+1):niter,5));
-params.v_minus = median(theta_store((burnin+1):niter,6));
-params.gamma1 = median(theta_store((burnin+1):niter,7));
-params.gamma2 = median(theta_store((burnin+1):niter,8));
-params.scale = median(theta_store((burnin+1):niter,9));
-params.lambda_mnz = median(theta_store((burnin+1):niter,10));
-[u_lead_post,u_trail_post] = solve_PDE_lead_trail(params);
+[u_lead_post,u_trail_post] = solve_PDE_lead_trail(median(theta_store_plot,1),nx,L,T,x_0);
 
 color_mat = [0,0,0
     flipud([255,247,243
