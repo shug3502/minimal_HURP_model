@@ -1,7 +1,7 @@
 rng(123);
-run_mcmc = true;
+run_mcmc = false;
 niter = 10^4;
-identifier = "v145_robin_10params";
+identifier = "v146_robin_10params";
 ntune = round(niter/10);
 burnin=niter/2;
 nparams=10;
@@ -142,7 +142,9 @@ print(sprintf('plots/posterior_traceplot_synthetic_data_%s.eps',identifier),'-de
 
 function theta_star = proposal(theta,S)
 %random walk proposal on log space
-theta_star = sign(theta).*exp(log(abs(theta)) + mvnrnd(zeros(length(theta),1),S));
+%theta_star = sign(theta).*exp(log(abs(theta)) + mvnrnd(zeros(length(theta),1),S));
+delta = 10^-6; %prevents random walk getting stuck near zero
+theta_star = sign(theta).*exp(log(delta + abs(theta)) + mvnrnd(zeros(length(theta),1),S));
 end
 
 function p = prior(theta,nparams)

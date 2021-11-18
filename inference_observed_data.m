@@ -1,7 +1,7 @@
 rng(123)
 run_mcmc = false;
 niter = 10^4;
-identifier = "v145_robin_flux_BCs";
+identifier = "v146_robin_flux_BCs";
 burnin=niter/2;
 ntune = round(niter/10);
 nparams=10;
@@ -83,11 +83,10 @@ figure;
 for i=1:nparams
     subplot(2,ceil(nparams/2),i);
 for ichain=1:nchains
-    plot(1:niter,theta_store(:,i,ichain),'LineWidth',2);
+    plot((burnin+1):niter,theta_store((burnin+1):niter,i,ichain),'LineWidth',2);
     xlabel('MCMC iteration'); ylabel(param_names{i});
     hold all;
 end
-    %     plot(1:niter,trueparams_vec(i)*ones(niter,1),'r--','linewidth',2);
     set(gca,'fontsize',font_size);
 end
 set(gcf,'PaperUnits','centimeters','PaperPosition',[0 0 42 21])
@@ -107,7 +106,7 @@ color_mat = [0,0,0
     122,1,119
     73,0,106]/256)];
 figure;
-x = linspace(0,params.L,params.nx);
+x = linspace(0,L,nx);
 subplot(2,2,1);
 box on;
 hold all;
@@ -161,7 +160,9 @@ print(sprintf('plots/HURP_PDE_posterior_simulation_%s.eps',identifier),'-depsc')
 
 function theta_star = proposal(theta,S)
 %random walk proposal on log space
-theta_star = sign(theta).*exp(log(abs(theta)) + mvnrnd(zeros(length(theta),1),S));
+%theta_star = sign(theta).*exp(log(abs(theta)) + mvnrnd(zeros(length(theta),1),S));
+delta = 10^-6; %prevents random walk getting stuck near zero
+theta_star = sign(theta).*exp(log(delta + abs(theta)) + mvnrnd(zeros(length(theta),1),S));
 end
 
 function p = prior(theta,nparams)
