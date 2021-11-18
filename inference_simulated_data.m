@@ -1,5 +1,5 @@
 rng(123);
-run_mcmc = false;
+run_mcmc = true;
 niter = 10^4;
 identifier = "v146_robin_10params";
 ntune = round(niter/10);
