@@ -1,7 +1,7 @@
 rng(123)
 run_mcmc = true;
 niter = 10^4;
-identifier = "v147_robin_flux_BCs";
+identifier = "v148_robin_flux_BCs";
 burnin=niter/2;
 ntune = round(niter/10);
 nparams=9;
@@ -161,7 +161,7 @@ print(sprintf('plots/HURP_PDE_posterior_simulation_%s.eps',identifier),'-depsc')
 function theta_star = proposal(theta,S)
 %random walk proposal on log space
 %theta_star = sign(theta).*exp(log(abs(theta)) + mvnrnd(zeros(length(theta),1),S));
-delta = 10^-6; %prevents random walk getting stuck near zero
+delta = 10.^[-2,-6*ones(1,length(theta)-1)]; %prevents random walk getting stuck near zero
 theta_star = sign(theta).*exp(log(delta + abs(theta)) + mvnrnd(zeros(length(theta),1),S));
 end
 
