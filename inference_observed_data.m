@@ -1,10 +1,10 @@
 rng(123)
 run_mcmc = true;
 niter = 10^4;
-identifier = "v148_robin_flux_BCs";
+identifier = "v149_robin_flux_BCs";
 burnin=niter/2;
 ntune = round(niter/10);
-nparams=9;
+nparams=10;
 nchains=4;
 
 L = 3.12; %domain size (um)
@@ -274,7 +274,7 @@ params.v_minus = params_vec(6);
 params.gamma1 = params_vec(7);
 params.gamma2 = params_vec(8);
 params.scale = params_vec(9);
-params.lambda_mnz = 0; %params_vec(10);
+params.lambda_mnz = params_vec(10);
 params.nx=nx;
 params.L=L;
 params.T=T;
@@ -523,7 +523,7 @@ while total_acceptances<niter
         if mod(total_acceptances,10)==0
             fprintf(sprintf('chain %d: iter %d: accept %f - l_h=%f, D_h=%f,lambda=%f, mu=%f, v_plus=%f, v_minus=%f, gamma1=%f, gamma2=%f, scale=%f, lambda_mnz=%f;\n',...
                 ichain,total_acceptances,total_acceptances/total_proposals,theta(1),theta(2),theta(3),theta(4),...
-                theta(5),theta(6),theta(7),theta(8),theta(9),0));
+                theta(5),theta(6),theta(7),theta(8),theta(9),theta(10)));
         end
     end
 end
