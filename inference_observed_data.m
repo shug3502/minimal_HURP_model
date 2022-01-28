@@ -1,7 +1,7 @@
 rng(123)
 run_mcmc = true;
 niter = 10^4;
-identifier = "v149_robin_flux_BCs";
+identifier = "v202_lead";
 burnin=niter/2;
 ntune = round(niter/10);
 nparams=10;
@@ -14,9 +14,10 @@ nx=61; %number of points in spatial discretization
 sigma = 0.005; %noise
 
 font_size = 18;
-df = readtable("in_vivo_hurp_switch_data_3_cells.csv"); %in vivo hurp profile data
-%naive background subtraction
-background = min(df.hurp(:));
+df = readtable("in_vivo_hurp_switch_data_9_cells.csv"); %in vivo hurp profile data
+%naive background subtraction -> already done for each individual movie now
+%background = min(df.hurp(:));
+background = 0;
 u_lead_data = NaN(10,31); u_trail_data = NaN(10,31);
 for j=0:9
     mask_data = (df.frames_relative_to_switch==j)&(df.sister=="leading");
@@ -61,7 +62,7 @@ else
     load(sprintf('mcmc_output_synthetic_data_%s.mat',identifier))
 end
 
-param_names = {'l_h','D_h','lambda','mu','v_+','v_-','gamma1','gamma2','scale','lambda_mnz','sigma'};
+param_names = {'l_h','D_h','lambda','mu','v_+','v_-','gamma1','gamma2','scale','r_mnz','sigma'};
 %combine chains for plotting and evaluating
 splitTheta = num2cell(theta_store((burnin+1):niter,:,:), [1 2]); %split A keeping dimension 1 and 2 intact
 theta_store_plot = vertcat(splitTheta{:});
@@ -232,10 +233,11 @@ if (nparams>=9)
         p = -Inf;
     end
 end
-%lambda_mnz ~ N(0,1) T[0,];
+%r_mnz ~ N(2,0.1) T[0,]; lambda_mnz = lambda/r_mnz
+%reparameterize so that can have relative to lambda
 if (nparams>=10)
     if (theta(10)>=0)
-        p = p + log(2*normpdf(theta(10),0,1.0));
+        p = p + log(2*normpdf(theta(10),2.0,0.10));
     else 
 	p = -Inf;
     end
@@ -274,7 +276,7 @@ params.v_minus = params_vec(6);
 params.gamma1 = params_vec(7);
 params.gamma2 = params_vec(8);
 params.scale = params_vec(9);
-params.lambda_mnz = params_vec(10);
+params.lambda_mnz = params_vec(3)/params_vec(10);
 params.nx=nx;
 params.L=L;
 params.T=T;
@@ -496,8 +498,8 @@ if isempty(theta0) %either draw repeatedly from prior, or restart from existing 
     [u_lead,u_trail] = solve_PDE_lead_trail(theta_star,nx,L,T,x_0);
     
     %evaluate likelihood
-    loglik = loglikelihood(u_lead(mask_t,mask_x),u_lead_data,sigma) + ...
-        loglikelihood(u_trail(mask_t,mask_x),u_trail_data,sigma);
+    loglik = loglikelihood(u_lead(mask_t,mask_x),u_lead_data,sigma); % + ...
+%        loglikelihood(u_trail(mask_t,mask_x),u_trail_data,sigma);
     end
 end
 theta = theta0(1:nparams);
@@ -511,8 +513,8 @@ while total_acceptances<niter
     [u_lead,u_trail] = solve_PDE_lead_trail(theta_star,nx,L,T,x_0);
     
     %evaluate likelihood
-    loglik_star = loglikelihood(u_lead(mask_t,mask_x),u_lead_data,sigma) + ...
-        loglikelihood(u_trail(mask_t,mask_x),u_trail_data,sigma);
+    loglik_star = loglikelihood(u_lead(mask_t,mask_x),u_lead_data,sigma); % + ...
+%        loglikelihood(u_trail(mask_t,mask_x),u_trail_data,sigma);
     acceptance_ratio = (loglik_star - loglik) + (prior(theta_star,nparams) - prior(theta,nparams));
     if log(rand(1)) < acceptance_ratio
         %accept
@@ -523,7 +525,7 @@ while total_acceptances<niter
         if mod(total_acceptances,10)==0
             fprintf(sprintf('chain %d: iter %d: accept %f - l_h=%f, D_h=%f,lambda=%f, mu=%f, v_plus=%f, v_minus=%f, gamma1=%f, gamma2=%f, scale=%f, lambda_mnz=%f;\n',...
                 ichain,total_acceptances,total_acceptances/total_proposals,theta(1),theta(2),theta(3),theta(4),...
-                theta(5),theta(6),theta(7),theta(8),theta(9),theta(10)));
+                theta(5),theta(6),theta(7),theta(8),theta(9),theta(3)/theta(10)));
         end
     end
 end

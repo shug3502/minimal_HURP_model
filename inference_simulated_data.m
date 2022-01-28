@@ -1,7 +1,7 @@
 rng(123);
 run_mcmc = true;
 niter = 10^4;
-identifier = "v146_robin_10params";
+identifier = "v201_robin_10params";
 ntune = round(niter/10);
 burnin=niter/2;
 nparams=10;
@@ -10,7 +10,7 @@ nx = 51; %number of points in spatial discretization
 L = 3; %domain size (um)
 T = 37; %time duration (s)
 x_0=0; %initial position of chromosomes
-sigma = 0.01; %noise
+sigma = 0.005; %noise
 
 trueparams.lambda = 0.05; %binding rate
 trueparams.D_h = 0.005; %10^(-2); %diffusion const for HURP
@@ -21,7 +21,7 @@ trueparams.v_plus = 0.03;
 trueparams.v_minus = -0.05;
 trueparams.gamma1 = 0.1;
 trueparams.gamma2 = -0.01;
-trueparams.lambda_mnz = 0.001;
+trueparams.lambda_mnz = 2.2;
 trueparams_vec = [trueparams.l_h,trueparams.D_h,trueparams.lambda,trueparams.mu,trueparams.v_plus,trueparams.v_minus,trueparams.gamma1,trueparams.gamma2,trueparams.scale,trueparams.lambda_mnz];
 tic; [u_lead_sim,u_trail_sim] = solve_PDE_lead_trail(trueparams_vec,nx,L,T,x_0); toc;
 %add observation noise
@@ -104,7 +104,7 @@ if run_mcmc
 else
     load(sprintf('mcmc_output_synthetic_data_%s.mat',identifier))
 end
-param_names = {'l_h','D_h','lambda','mu','v_+','v_-','gamma1','gamma2','scale','lambda_mnz','sigma'};
+param_names = {'l_h','D_h','lambda','mu','v_+','v_-','gamma1','gamma2','scale','r_mnz','sigma'};
 %combine chains for plotting and evaluating
 splitTheta = num2cell(theta_store((burnin+1):niter,:,:), [1 2]); %split A keeping dimension 1 and 2 intact
 theta_store_plot = vertcat(splitTheta{:}); %see eg here https://uk.mathworks.com/matlabcentral/answers/295692-concatenate-vertically-along-the-3rd-dimension-of-a-matrix
@@ -214,10 +214,10 @@ if (nparams>=9)
         p = -Inf;
     end
 end
-%lambda_mnz ~ N(0,1) T[0,];
+%lambda_mnz ~ N(2,0.1) T[0,];
 if (nparams>=10)
     if (theta(10)>=0)
-        p = p + log(2*normpdf(theta(10),0,1));
+        p = p + log(2*normpdf(theta(10),2.0,0.1));
     else
         p = -Inf;
     end
@@ -256,7 +256,7 @@ params.v_minus = params_vec(6);
 params.gamma1 = params_vec(7);
 params.gamma2 = params_vec(8);
 params.scale = params_vec(9);
-params.lambda_mnz = params_vec(10);
+params.lambda_mnz = params_vec(3)/params_vec(10);
 params.nx=nx;
 params.L=L;
 params.T=T;
@@ -498,7 +498,7 @@ while total_acceptances<niter
         if mod(total_acceptances,10)==0
             fprintf(sprintf('chain %d: iter %d: accept %f - l_h=%f, D_h=%f,lambda=%f, mu=%f, v_plus=%f, v_minus=%f, gamma1=%f, gamma2=%f, scale=%f, lambda_mnz=%f;\n',...
                 ichain,total_acceptances,total_acceptances/total_proposals,theta(1),theta(2),theta(3),theta(4),...
-                theta(5),theta(6),theta(7),theta(8),theta(9),theta(10)));
+                theta(5),theta(6),theta(7),theta(8),theta(9),theta(3)/theta(10)));
         end
     end
 end
