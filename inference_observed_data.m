@@ -498,8 +498,8 @@ if isempty(theta0) %either draw repeatedly from prior, or restart from existing 
     [u_lead,u_trail] = solve_PDE_lead_trail(theta_star,nx,L,T,x_0);
     
     %evaluate likelihood
-    loglik = loglikelihood(u_lead(mask_t,mask_x),u_lead_data,sigma); % + ...
-%        loglikelihood(u_trail(mask_t,mask_x),u_trail_data,sigma);
+    loglik = loglikelihood(u_lead(mask_t,mask_x),u_lead_data,sigma) + ...
+        loglikelihood(u_trail(mask_t,mask_x),u_trail_data,sigma);
     end
 end
 theta = theta0(1:nparams);
@@ -513,8 +513,8 @@ while total_acceptances<niter
     [u_lead,u_trail] = solve_PDE_lead_trail(theta_star,nx,L,T,x_0);
     
     %evaluate likelihood
-    loglik_star = loglikelihood(u_lead(mask_t,mask_x),u_lead_data,sigma); % + ...
-%        loglikelihood(u_trail(mask_t,mask_x),u_trail_data,sigma);
+    loglik_star = loglikelihood(u_lead(mask_t,mask_x),u_lead_data,sigma) + ...
+        loglikelihood(u_trail(mask_t,mask_x),u_trail_data,sigma);
     acceptance_ratio = (loglik_star - loglik) + (prior(theta_star,nparams) - prior(theta,nparams));
     if log(rand(1)) < acceptance_ratio
         %accept
