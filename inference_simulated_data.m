@@ -1,5 +1,5 @@
 rng(123);
-run_mcmc = true;
+run_mcmc = false;
 niter = 10^4;
 identifier = "v201_robin_10params";
 ntune = round(niter/10);
@@ -11,6 +11,7 @@ L = 3; %domain size (um)
 T = 37; %time duration (s)
 x_0=0; %initial position of chromosomes
 sigma = 0.005; %noise
+lambda_linear = 1;
 
 trueparams.lambda = 0.05; %binding rate
 trueparams.D_h = 0.005; %10^(-2); %diffusion const for HURP
@@ -23,7 +24,7 @@ trueparams.gamma1 = 0.1;
 trueparams.gamma2 = -0.01;
 trueparams.lambda_mnz = 2.2;
 trueparams_vec = [trueparams.l_h,trueparams.D_h,trueparams.lambda,trueparams.mu,trueparams.v_plus,trueparams.v_minus,trueparams.gamma1,trueparams.gamma2,trueparams.scale,trueparams.lambda_mnz];
-tic; [u_lead_sim,u_trail_sim] = solve_PDE_lead_trail(trueparams_vec,nx,L,T,x_0); toc;
+tic; [u_lead_sim,u_trail_sim] = solve_PDE_lead_trail(trueparams_vec,nx,L,T,x_0,lambda_linear); toc;
 %add observation noise
 u_lead_sim = u_lead_sim + sigma*randn(size(u_lead_sim));
 u_trail_sim = u_trail_sim + sigma*randn(size(u_trail_sim));
@@ -84,7 +85,7 @@ if run_mcmc
     %pilot run to tune proposal
     parfor ichain=1:nchains
         theta_tune(:,:,ichain) = run_RW_metropolis(ichain,u_lead_sim,u_trail_sim,S,...
-            mask_x,mask_t,nx,L,T,x_0,sigma,ntune,nparams,[]);
+            mask_x,mask_t,nx,L,T,x_0,lambda_linear,sigma,ntune,nparams,[]);
     end
 %    theta_store(1:ntune,:,:) = theta_tune;
     splitTheta = num2cell(theta_tune, [1 2]); %split A keeping dimension 1 and 2 intact
@@ -97,14 +98,14 @@ if run_mcmc
     parfor ichain = 1:nchains
         theta_store(:,:,ichain) = [theta_tune(:,:,ichain); ...
             run_RW_metropolis(ichain,u_lead_sim,u_trail_sim,S_opt,...
-            mask_x,mask_t,nx,L,T,x_0,sigma,niter-ntune,nparams,...
+            mask_x,mask_t,nx,L,T,x_0,lambda_linear,sigma,niter-ntune,nparams,...
         theta_tune(end,:,ichain))];
     end
     save(sprintf('mcmc_output_synthetic_data_%s.mat',identifier))
 else
     load(sprintf('mcmc_output_synthetic_data_%s.mat',identifier))
 end
-param_names = {'l_h','D_h','lambda','mu','v_+','v_-','gamma1','gamma2','scale','r_mnz','sigma'};
+param_names = {'$l$','$D$','$\lambda$','$\mu$','$\nu_+$','$\nu_-$','$\gamma_1$','$\gamma_2$','$s$','$r$','$\sigma$'};
 %combine chains for plotting and evaluating
 splitTheta = num2cell(theta_store((burnin+1):niter,:,:), [1 2]); %split A keeping dimension 1 and 2 intact
 theta_store_plot = vertcat(splitTheta{:}); %see eg here https://uk.mathworks.com/matlabcentral/answers/295692-concatenate-vertically-along-the-3rd-dimension-of-a-matrix
@@ -117,7 +118,7 @@ for i=1:nparams
     subplot(2,ceil(nparams/2),i);
     histogram(theta_store_plot(:,i),'DisplayStyle','stairs',...
         'Normalization','pdf','EdgeColor','k','LineWidth',2);
-    xlabel(param_names{i}); ylabel('Density');
+    xlabel(param_names{i},'interpreter','latex'); ylabel('Density');
     hold all;
     plot(trueparams_vec(i)*ones(101,1),linspace(0,max(ylim()),101),...
         'r--','linewidth',2);
@@ -130,7 +131,7 @@ for i=1:nparams
     subplot(2,ceil(nparams/2),i);
     for ichain=1:nchains
         plot(1:niter,theta_store(:,i,ichain),'LineWidth',2);
-        xlabel('MCMC iter'); ylabel(param_names{i});
+        xlabel('MCMC iter'); ylabel(param_names{i},'interpreter','latex');
         hold all;
     end
     plot(1:niter,trueparams_vec(i)*ones(niter,1),'r--','linewidth',2);
@@ -246,7 +247,7 @@ Y = B^A/gamma(A)*X.^(-A-1).*exp(-B./X);
 end
 
 
-function [u_lead,u_trail] = solve_PDE_lead_trail(params_vec,nx,L,T,x_0)
+function [u_lead,u_trail] = solve_PDE_lead_trail(params_vec,nx,L,T,x_0,lambda_linear)
 params.l_h = params_vec(1);
 params.D_h = params_vec(2);
 params.lambda = params_vec(3);
@@ -257,6 +258,7 @@ params.gamma1 = params_vec(7);
 params.gamma2 = params_vec(8);
 params.scale = params_vec(9);
 params.lambda_mnz = params_vec(3)/params_vec(10);
+params.lambda_linear = lambda_linear;
 params.nx=nx;
 params.L=L;
 params.T=T;
@@ -270,7 +272,7 @@ params.mu_gtp = params.mu;
 params.mu_gdp = params.mu;
 params.lambda_gtp=params.lambda_mnz; %allow preferential binding to gdp tubulin
 params.lambda_gdp=params.lambda; % only part to change is the binding in the MNZ/GTP cap region
-params.is_gradient_relative_to_chromosomes=0;
+params.is_gradient_relative_to_chromosomes=1;
 params.gradient_shape = "exponential"; %"flat top", "linear bump", "exponential"
 params.v=params.v_plus; %speed of chromosome movements
 m = 0; %symmetry of coordinate system
@@ -316,8 +318,9 @@ end
 function rate = lambda(x,l,params)
 lambda_gtp = params.lambda_gtp;
 lambda_gdp = params.lambda_gdp;
+lambda_linear = params.lambda_linear;
 if x<l
-    rate=lambda_gtp;
+    rate=lambda_gtp + lambda_linear*(lambda_gdp-lambda_gtp)*x/l; 
 else
     rate=lambda_gdp;
 end
@@ -459,7 +462,7 @@ L = sum(log(mvnpdf(reshape(data,1,[]),reshape(sim,1,[]),sigma*eye(N))),'all');
 end
 
 function theta_store = run_RW_metropolis(ichain,u_lead_sim,u_trail_sim,S,...
-    mask_x,mask_t,nx,L,T,x_0,sigma,niter,nparams,theta0)
+    mask_x,mask_t,nx,L,T,x_0,lambda_linear,sigma,niter,nparams,theta0)
 theta_store = NaN(niter,nparams);
 loglik = -Inf;
 if isempty(theta0) %either draw repeatedly from prior, or restart from existing chain
@@ -468,7 +471,7 @@ if isempty(theta0) %either draw repeatedly from prior, or restart from existing 
         abs(0.1*randn(1)),-abs(0.1*randn(1)),abs(randn(1)),abs(randn(1))];
     theta_star=theta0;
     %solve PDE
-    [u_lead,u_trail] = solve_PDE_lead_trail(theta_star,nx,L,T,x_0);
+    [u_lead,u_trail] = solve_PDE_lead_trail(theta_star,nx,L,T,x_0,lambda_linear);
     
     %evaluate likelihood
     loglik = loglikelihood(u_lead(mask_t,mask_x),u_lead_sim(mask_t,mask_x),sigma) + ...
@@ -483,7 +486,7 @@ while total_acceptances<niter
     total_proposals = total_proposals + 1;
     
     %solve PDE
-    [u_lead,u_trail] = solve_PDE_lead_trail(theta_star,nx,L,T,x_0);
+    [u_lead,u_trail] = solve_PDE_lead_trail(theta_star,nx,L,T,x_0,lambda_linear);
     
     %evaluate likelihood
     loglik_star = loglikelihood(u_lead(mask_t,mask_x),u_lead_sim(mask_t,mask_x),sigma) + ...
