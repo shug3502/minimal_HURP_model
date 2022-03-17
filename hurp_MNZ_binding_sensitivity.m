@@ -1,207 +1,173 @@
-
-params.lambda = 0.05; %binding rate
-params.D_h = 0.005; %10^(-2); %diffusion const for HURP
-params.scale = 1.0; %spatial scale for Ran GTP gradient
-params.mu = 0.05; %decay rate
+th = load('mcmc_output_synthetic_data_v212_lambda_linear_in_mnz.mat');
+splitTheta = num2cell(th.theta_store((th.burnin+1):th.niter,:,:), [1 2]); %split A keeping dimension 1 and 2 intact
+theta_store_plot = vertcat(splitTheta{:});
+theta = median(theta_store_plot,1);  
+params.lambda = theta(3); %binding rate
+params.D_h = theta(2); %10^(-2); %diffusion const for HURP
+params.scale = theta(9); %spatial scale for Ran GTP gradient
+params.mu = theta(4); %decay rate
 params.mu_gtp = params.mu;
 params.mu_gdp = params.mu;
-params.L = 3; %domain size (um)
+params.L = 3.12; %domain size (um)
 params.T = 37; %time duration (s)
-params.lambda_gtp=0; %allow preferential binding to gdp tubulin
+params.lambda_gtp=params.lambda/theta(10); %allow preferential binding to gdp tubulin
 params.lambda_gdp=params.lambda; % only part to change is the binding in the MNZ/GTP cap region
 params.x_0=0; %initial position of chromosomes
 params.nx=501; %number of points in spatial discretization
-v=0.03;
+params.gamma1=theta(7);
+params.gamma2=theta(8);
+params.v_plus=theta(5);
+params.v_minus=theta(6);
+params.lambda_linear = 1;
+font_size = 18;
 
     x = linspace(0,params.L,params.nx);
     t = linspace(0,params.T,50);
-
-l_h_vec = linspace(0,2,51);
+l_h_vec = linspace(0,2.5,51);
 hurp_gap=zeros(size(l_h_vec));
 for ll = 1:length(l_h_vec)
+    ll
     %trailing kinetochore
     params.l_h = l_h_vec(ll);
-    params.is_gradient_relative_to_chromosomes=0;
-    params.gradient_shape = "exponential"; %"flat top", "linear bump", "exponential"
-    params.v=v; %speed of chromosome movements
-    m = 0; %symmetry of coordinate system
-    init_fun = @(x) pdex1ic(x,ones(1,params.nx),params);
-    fun = @(x,t,u,dudx) pdex1pde(x,t,u,dudx,params); % anonymous function
-    sol = pdepe(m,fun,init_fun,@pdex1bc,x,t);
-    u = sol(:,:,1);
-    
-    %%%%%%%%%%%%%%%%%%%
-    %for leading kinetochore sister
-    params.lambda_gtp=params.lambda;
-    params.lambda_gdp=params.lambda;
-    params.v = -v;
-    params.mu_gtp = params.mu;
-    params.mu_gdp = params.mu;
-    
-    fun = @(x,t,u,dudx) pdex1pde(x,t,u,dudx,params); % anonymous function
-    init_fun_lead = @(x) pdex1ic(x,u(end,:),params);
-    sol = pdepe(m,fun,init_fun_lead,@pdex1bc,x,t);
-    
-    u = sol(:,:,1);
-    
-    %for trailing kinetochore sister
-    params.lambda_gtp=0; % define parameters here
-    params.lambda_gdp=params.lambda; % only part to change is the binding in the gtp region
-    params.v = v;
-    params.mu_gtp = params.mu;
-    params.mu_gdp = params.mu;
-    
-    init_fun_trail = @(x) pdex1ic(x,u(end,:),params);
-    fun = @(x,t,u,dudx) pdex1pde(x,t,u,dudx,params); % anonymous function
-    sol = pdepe(m,fun,init_fun_trail,@pdex1bc,x,t);
-    u = sol(:,:,1);
-    [~,I] = max(u(end,:));
-    hurp_gap(ll) = x(I);
-end
-
-%REPEAT FOR PLOTTING
-%trailing kinetochore
-params.l_h = 0.5;
-params.lambda_gtp=0; % define parameters here
+    params.lambda_gtp=params.lambda/theta(10); % define parameters here
 params.lambda_gdp=params.lambda; % only part to change is the binding in the gtp region
 params.is_gradient_relative_to_chromosomes=1;
 params.gradient_shape = "exponential"; %"flat top", "linear bump", "exponential"
-params.v=v;
+params.v=params.v_plus;
 m = 0; %symmetry of coordinate system
 init_fun = @(x) pdex1ic(x,ones(1,params.nx),params);
 fun = @(x,t,u,dudx) pdex1pde(x,t,u,dudx,params); % anonymous function
-sol = pdepe(m,fun,init_fun,@pdex1bc,x,t);
+bc_fun = @(xl,ul,xr,ur,t) pdex1bc(xl,ul,xr,ur,t,params);
+%sol = pdepe(m,fun,init_fun,@pdex1bc,x,t);
+sol = pdepe(m,fun,init_fun,bc_fun,x,t);
 u = sol(:,:,1);
+
 
 %%%%%%%%%%%%%%%%%%%
 %for leading kinetochore sister
 params.lambda_gtp=params.lambda;
 params.lambda_gdp=params.lambda;
-params.v = -v;
+params.v = params.v_minus;
 params.mu_gtp = params.mu;
 params.mu_gdp = params.mu;
 
 fun = @(x,t,u,dudx) pdex1pde(x,t,u,dudx,params); % anonymous function
 init_fun_lead = @(x) pdex1ic(x,u(end,:),params);
-sol = pdepe(m,fun,init_fun_lead,@pdex1bc,x,t);
-
+bc_fun = @(xl,ul,xr,ur,t) pdex1bc(xl,ul,xr,ur,t,params);
+%sol = pdepe(m,fun,init_fun_lead,@pdex1bc,x,t);
+sol = pdepe(m,fun,init_fun_lead,bc_fun,x,t);
 u_lead = sol(:,:,1);
-
+    
 %for trailing kinetochore sister
-params.lambda_gtp=0; % define parameters here
+params.lambda_gtp=params.lambda/theta(10); % define parameters here
 params.lambda_gdp=params.lambda; % only part to change is the binding in the gtp region
-params.v = v;
+params.v = params.v_plus;
 params.mu_gtp = params.mu;
 params.mu_gdp = params.mu;
 
+
 init_fun_trail = @(x) pdex1ic(x,u_lead(end,:),params);
 fun = @(x,t,u,dudx) pdex1pde(x,t,u,dudx,params); % anonymous function
-sol = pdepe(m,fun,init_fun_trail,@pdex1bc,x,t);
+bc_fun = @(xl,ul,xr,ur,t) pdex1bc(xl,ul,xr,ur,t,params);
+%sol = pdepe(m,fun,init_fun_trail,@pdex1bc,x,t);
+sol = pdepe(m,fun,init_fun_trail,bc_fun,x,t);
 u_trail = sol(:,:,1);
-
-%
-%         color_mat = flipud([142,1,82;
-%             197,27,125;
-%             222,119,174;
-%             241,182,218;
-%             253,224,239;
-%             230,245,208;
-%             184,225,134;
-%             127,188,65;
-%             77,146,33;
-%             39,100,25]/256);
-color_mat = [0,0,0
-    flipud([255,247,243
-    253,224,221
-    252,197,192
-    250,159,181
-    247,104,161
-    221,52,151
-    174,1,126
-    122,1,119
-    73,0,106]/256)];
-font_size = 24;
-df = readtable("~/Documents/Postdoc/HURP/in_vivo_hurp_switch_data_3_cells.csv"); %in vivo hurp profile data
-figure;
-subplot(2,2,1);
-box on;
-hold all;
-for j=0:9
-    mask=(df.frames_relative_to_switch==j)&(df.sister=="trailing");
-    plot(df.Position_dx(mask),...
-        df.hurp(mask),'Color',color_mat(j+1,:),'Linewidth',3);
+    [~,I] = max(u_trail(end,:));
+    hurp_gap(ll) = x(I);
 end
-set(gca,'fontsize',font_size);
-xlabel('Distance along k-fibre (um)');
-ylabel('HURP (a.u.)');
-title('Trailing kinetochore (data)');
-
-subplot(2,2,2);
-box on;
-hold all;
-for j=0:9
-    plot(x,u_trail(1+j*5,:),'Color',color_mat(j+1,:),'Linewidth',3);
-end
-set(gca,'fontsize',font_size);
-xlabel('Distance along k-fibre (um)');
-ylabel('HURP (a.u.)');
-title('Trailing kinetochore (model)');
-
-subplot(2,2,3);
-box on;
-hold all;
-for j=0:9
-    mask=(df.frames_relative_to_switch==j)&(df.sister=="leading");
-    plot(df.Position_dx(mask),...
-        df.hurp(mask),'Color',color_mat(j+1,:),'Linewidth',3);
-end
-set(gca,'fontsize',font_size);
-xlabel('Distance along k-fibre (um)');
-ylabel('HURP (a.u.)');
-title('Leading kinetochore (data)');
-
-subplot(2,2,4);
-box on;
-hold all;
-for j=0:9
-    plot(x,u_lead(1+j*5,:),'Color',color_mat(j+1,:),'Linewidth',3);
-end
-set(gca,'fontsize',font_size);
-xlabel('Distance along k-fibre (um)');
-ylabel('HURP (a.u.)');
-title('Leading kinetochore (model)');
-%lgd = legend(string(0:9),'Location','west','Orientation','vertical');
-
-set(gcf,'PaperUnits','centimeters','PaperPosition',[0 0 42 21])
-print(sprintf('plots/HURP_PDE_solution_gradient_relative_to_chromsomes_%d_%s',...
-    params.is_gradient_relative_to_chromosomes,params.gradient_shape),'-depsc')
 
 figure;
 plot(l_h_vec,hurp_gap,'Linewidth',3,'Color','k');
 hold all;
-plot(linspace(0,2,201),1.9*ones(201,1),'k--','Linewidth',1.5);
+plot(linspace(0,2.5,201),1.56*ones(201,1),'k--','Linewidth',1.5);
+xline(quantile(theta_store_plot(:,1),0.025),'-.r','','Linewidth',1.5)
+xline(quantile(theta_store_plot(:,1),0.975),'-.r','','Linewidth',1.5)
 set(gca,'fontsize',font_size);
 xlabel('Length of MNZ and GTP-cap (um)');
-ylabel('Length of HURP gap (um)');
-set(gcf,'PaperUnits','centimeters','PaperPosition',[0 0 21 21])
+ylabel({'Distance between kinetochore';'and HURP peak (um)'});
+set(gcf,'PaperUnits','centimeters','PaperPosition',[0 0 11 11])
 print(sprintf('plots/HURP_gap_vs_MNZ_gradient_relative_to_chromosomes_%d_%s',...
     params.is_gradient_relative_to_chromosomes,params.gradient_shape),'-depsc')
 
-xx = linspace(-params.L,params.L,301);
+
+%now sensitivity to speed
+params.l_h = theta(1);
+speed_vec = linspace(0,0.1,51);
+hurp_gap=zeros(size(speed_vec));
+for vv = 1:length(speed_vec)
+    vv
+    %trailing kinetochore
+    params.v_plus = speed_vec(vv);
+    params.v_minus = -speed_vec(vv);
+params.lambda_gtp=params.lambda/theta(10); % define parameters here
+params.lambda_gdp=params.lambda; % only part to change is the binding in the gtp region
+params.is_gradient_relative_to_chromosomes=1;
+params.gradient_shape = "exponential"; %"flat top", "linear bump", "exponential"
+params.v=params.v_plus;
+m = 0; %symmetry of coordinate system
+init_fun = @(x) pdex1ic(x,ones(1,params.nx),params);
+fun = @(x,t,u,dudx) pdex1pde(x,t,u,dudx,params); % anonymous function
+bc_fun = @(xl,ul,xr,ur,t) pdex1bc(xl,ul,xr,ur,t,params);
+%sol = pdepe(m,fun,init_fun,@pdex1bc,x,t);
+sol = pdepe(m,fun,init_fun,bc_fun,x,t);
+u = sol(:,:,1);
+
+
+%%%%%%%%%%%%%%%%%%%
+%for leading kinetochore sister
+params.lambda_gtp=params.lambda;
+params.lambda_gdp=params.lambda;
+params.v = params.v_minus;
+params.mu_gtp = params.mu;
+params.mu_gdp = params.mu;
+
+fun = @(x,t,u,dudx) pdex1pde(x,t,u,dudx,params); % anonymous function
+init_fun_lead = @(x) pdex1ic(x,u(end,:),params);
+bc_fun = @(xl,ul,xr,ur,t) pdex1bc(xl,ul,xr,ur,t,params);
+%sol = pdepe(m,fun,init_fun_lead,@pdex1bc,x,t);
+sol = pdepe(m,fun,init_fun_lead,bc_fun,x,t);
+u_lead = sol(:,:,1);
+    
+%for trailing kinetochore sister
+params.lambda_gtp=params.lambda/theta(10); % define parameters here
+params.lambda_gdp=params.lambda; % only part to change is the binding in the gtp region
+params.v = params.v_plus;
+params.mu_gtp = params.mu;
+params.mu_gdp = params.mu;
+
+
+init_fun_trail = @(x) pdex1ic(x,u_lead(end,:),params);
+fun = @(x,t,u,dudx) pdex1pde(x,t,u,dudx,params); % anonymous function
+bc_fun = @(xl,ul,xr,ur,t) pdex1bc(xl,ul,xr,ur,t,params);
+%sol = pdepe(m,fun,init_fun_trail,@pdex1bc,x,t);
+sol = pdepe(m,fun,init_fun_trail,bc_fun,x,t);
+u_trail = sol(:,:,1);
+    [~,I] = max(u_trail(end,:));
+    hurp_gap(vv) = x(I);
+end
+% 
+
 figure;
-plot(xx,ran_gradient(xx,params),'linewidth',3,'color','k');
+plot(speed_vec,hurp_gap,'Linewidth',3,'Color','k');
+hold all;
+plot(linspace(0,0.1,201),1.56*ones(201,1),'k--','Linewidth',1.5);
+xline(quantile(theta_store_plot(:,5),0.025),'-.r','','Linewidth',1.5) %use quantiles from posterior (loaded)
+xline(quantile(theta_store_plot(:,5),0.975),'-.r','','Linewidth',1.5)
 set(gca,'fontsize',font_size);
-xlabel('Position along spindle axis (um)');
-ylabel('Ran-GTP (a.u.)');
-set(gcf,'PaperUnits','centimeters','PaperPosition',[0 0 21 21])
-print(sprintf('plots/Ran_gradient_%s',params.gradient_shape),'-depsc')
+xlabel('Speed (um/s)');
+%ylabel('Length of HURP gap (um)');
+ylabel({'Distance between kinetochore';'and HURP peak (um)'});
+set(gcf,'PaperUnits','centimeters','PaperPosition',[0 0 11 11])
+print(sprintf('plots/HURP_gap_vs_speed_%d_%s',...
+    params.is_gradient_relative_to_chromosomes,params.gradient_shape),'-depsc')
+
 
 %%%%%%%%%%%%%%%%%%%%%%%
 function rate = lambda(x,l,params)
 lambda_gtp = params.lambda_gtp;
 lambda_gdp = params.lambda_gdp;
 if x<l
-    rate=lambda_gtp;
+    rate=lambda_gtp + params.lambda_linear*(lambda_gdp-lambda_gtp)*x/l;
 else
     rate=lambda_gdp;
 end
@@ -334,10 +300,13 @@ end
 % %u0 = exp(-x/0.1);
 % end
 %----------------------------------------------
-function [pl,ql,pr,qr] = pdex1bc(xl,ul,xr,ur,t) % Boundary conditions
-pl = ul; %0
-ql = 0; %1;
-pr = 0;%ur;
-qr =1; %0;
+function [pl,ql,pr,qr] = pdex1bc(xl,ul,xr,ur,t,params) % Boundary conditions
+pl = params.gamma1*ul; %0; %ul;
+ql = -1; %1; %0
+pr = params.gamma2;%ur;
+qr = -1; %0;
 end
 %----------------------------------------------
+
+
+
