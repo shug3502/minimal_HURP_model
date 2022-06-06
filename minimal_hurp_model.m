@@ -121,7 +121,7 @@ color_mat = [0,0,0
     122,1,119
     73,0,106]/256)];
 font_size = 24;
-df = readtable("~/Documents/Postdoc/HURP/in_vivo_hurp_switch_data_3_cells.csv"); %in vivo hurp profile data
+df = readtable("~/Documents/Postdoc/HURP/in_vivo_hurp_switch_data_9_cells.csv"); %in vivo hurp profile data
 figure;
 subplot(2,2,1);
 box on;
